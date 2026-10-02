@@ -44,6 +44,11 @@ sincronizadas periodicamente.
   criptografados do Streamlit Cloud; nenhum secret de produção foi configurado.
   A implantação acompanha `main`, então novos commits nessa branch podem
   atualizar automaticamente o app hospedado.
+- Foi escolhido preparar um piloto gratuito e limitado para um amigo usar com
+  dados reais da loja, sem criar recursos pagos. O onboarding documentado cria
+  um usuário Supabase e um tenant exclusivo no DEV; a conta ainda não foi
+  criada nem recebeu dados. O Community Cloud e o plano gratuito do Supabase
+  não oferecem garantias de produção, e os limites podem mudar.
 - O URL padrão de recuperação do Supabase DEV era `http://localhost:3000`.
   Foi criado e iniciado `recuperar_senha_dev.py`, um callback local limitado
   ao loopback. O primeiro fluxo de recuperação foi concluído, mas a senha
