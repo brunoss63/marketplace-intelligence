@@ -87,12 +87,12 @@ def is_database_mode() -> bool:
             ambiente = st.secrets.get("MI_ENV")
         except StreamlitSecretNotFoundError:
             ambiente = None
-    if ambiente not in {"local", "production"}:
+    if ambiente not in {"local", "development", "production"}:
         raise RuntimeError(
-            "Configure MI_ENV como 'local' ou 'production' antes de "
-            "acessar os dados."
+            "Configure MI_ENV como 'local', 'development' ou 'production' "
+            "antes de acessar os dados."
         )
-    return ambiente == "production"
+    return ambiente in {"development", "production"}
 
 
 def obter_cliente_supabase() -> Client:

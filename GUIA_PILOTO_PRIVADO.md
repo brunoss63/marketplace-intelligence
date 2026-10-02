@@ -3,11 +3,12 @@
 ## Estado desta etapa
 
 O painel exige autenticação individual pelo Supabase Auth quando
-`MI_ENV=production`, resolve o tenant vinculado à conta e lê/grava pedidos,
-produtos, estoque, publicidade e histórico de importação no Postgres usando a
-sessão autenticada. As políticas RLS restringem as operações ao tenant do
-usuário. O modo local precisa ser ativado explicitamente com `MI_ENV=local` e
-continua usando os CSVs locais.
+`MI_ENV=development` ou `MI_ENV=production`, resolve o tenant vinculado à
+conta e lê/grava pedidos, produtos, estoque, publicidade e histórico de
+importação no Postgres usando a sessão autenticada. Cada ambiente usa
+credenciais Supabase próprias. As políticas RLS restringem as operações ao
+tenant do usuário. O modo local precisa ser ativado explicitamente com
+`MI_ENV=local` e continua usando os CSVs locais.
 
 O projeto Supabase do piloto, o schema e o vínculo inicial do tenant já foram
 criados e aplicados. A validação autenticada foi concluída com a importação de
@@ -22,6 +23,30 @@ As leituras do banco ficam em cache por até 30 segundos, isoladas por tenant e
 usuário. Uma importação pelo painel invalida o cache imediatamente para que os
 dados recém-importados apareçam sem aguardar o vencimento.
 
+O ambiente DEV separado já foi criado na organização BRDS Insights, na região
+São Paulo (`sa-east-1`), com o schema e as políticas RLS aplicados. Há duas
+contas de teste confirmadas e vinculadas a tenants distintos, e o cadastro
+público está desativado. Uma conta provisória, criada com um endereço de teste
+inacessível, permanece sem vínculo com tenant no DEV. As credenciais DEV foram
+adicionadas somente ao `.streamlit/secrets.toml` local, que é ignorado pelo
+Git; as credenciais do piloto foram preservadas.
+
+O login da conta A foi confirmado no app local. A senha da conta B foi
+redefinida no Supabase DEV e o login imediato por e-mail/senha foi confirmado
+via Auth API e pela interface Streamlit. O app está rodando somente em
+`http://127.0.0.1:8501`. O valor local `MI_ENV` deve ser `development` ao
+trabalhar contra o DEV; `production` no arquivo local causou a falha de login
+da conta B e foi corrigido.
+
+O URL de recuperação padrão do Supabase DEV estava configurado como
+`http://localhost:3000`, onde não havia um servidor. O utilitário local
+`recuperar_senha_dev.py` atende esse endereço somente na máquina local,
+valida o token de recuperação no navegador e atualiza a senha diretamente no
+Supabase DEV. Esse fluxo foi tentado; depois a senha da conta B foi redefinida
+por um utilitário local descartável usando o Admin API e validada por um login
+imediato no Auth. O utilitário administrativo não é mantido no repositório.
+Não compartilhe links de recuperação, senhas ou chaves administrativas.
+
 Antes de usar dados reais, valide o caminho completo de leitura/importação na
 instância hospedada, configure cópias de segurança e restauração, e confirme
 HTTPS, domínio e retenção de dados. A importação de registros e a gravação do
@@ -31,32 +56,117 @@ chaves de negócio, mas a importação não é uma transação única.
 
 ## Criar o projeto Supabase
 
-1. Crie um projeto Supabase na organização que controlará o piloto.
+Crie projetos Supabase distintos para desenvolvimento e produção. Não use o
+projeto que já contém dados do piloto como ambiente de desenvolvimento.
+
+O projeto DEV já criado chama-se `marketplace-intelligence-dev`. Para
+reproduzir essa configuração em outro ambiente:
+
+1. Crie um projeto Supabase novo, com nome que identifique claramente DEV.
 2. Em **Authentication > Providers**, mantenha habilitado o provedor de
    e-mail/senha e desative o cadastro público de usuários.
-3. Em **Authentication > Users**, crie individualmente as contas autorizadas
-   para você e para as pessoas do cliente.
-4. Em **Project Settings > API**, copie o Project URL e a chave `anon`/
-   publishable. Nunca use a chave `service_role` no aplicativo.
+3. Aplique primeiro
+   `supabase/migrations/20261002150000_pilot_schema.sql` no SQL Editor do
+   projeto DEV.
+4. Em **Authentication > Users**, crie somente o primeiro usuário de teste.
+   Depois aplique
+   `supabase/migrations/20261002153000_pilot_owner.sql`. Essa migration exige
+   exatamente um usuário Auth e o associa ao tenant inicial.
+5. Crie o segundo usuário de teste. No SQL Editor DEV, crie um tenant separado
+   e associe esse usuário a ele, substituindo o e-mail abaixo pelo e-mail de
+   teste:
+
+   ```sql
+   do $$
+   declare
+       test_user_id uuid;
+       test_tenant_id uuid;
+   begin
+       select id into strict test_user_id
+       from auth.users
+       where email = 'usuario-b-dev@example.invalid';
+
+       insert into public.tenants (name, slug)
+       values ('Tenant B DEV', 'tenant-b-dev')
+       returning id into test_tenant_id;
+
+       insert into public.tenant_members (tenant_id, user_id, role)
+       values (test_tenant_id, test_user_id, 'owner');
+   end
+   $$;
+   ```
+
+6. Em **Project Settings > API**, obtenha o Project URL e a chave
+   `anon`/publishable do DEV. Nunca use a chave `service_role` no aplicativo.
+
+A migration `20261002153000_pilot_owner.sql` só deve ser executada quando o
+projeto tiver exatamente um usuário Auth. Não a execute novamente ao criar os
+usuários de teste nem aplique-a como parte da preparação de outro ambiente sem
+verificar essa condição.
 
 ## Configurar o Streamlit
 
-Configure estes valores na área de secrets/environment variables do serviço de
-hospedagem:
+Para desenvolvimento local conectado ao Supabase DEV, configure em
+`.streamlit/secrets.toml` (arquivo local, não versionado):
+
+```toml
+MI_ENV = "development"
+SUPABASE_DEV_URL = "https://<dev-project-id>.supabase.co"
+SUPABASE_DEV_ANON_KEY = "<chave-publishable-do-dev>"
+```
+
+Neste workspace, `MI_ENV` está definido como `development` e os valores
+`SUPABASE_DEV_URL` e `SUPABASE_DEV_ANON_KEY` estão no arquivo local,
+preservando as configurações legadas do piloto. Para iniciar o app conectado
+ao DEV em uma janela PowerShell:
+
+```powershell
+$env:MI_ENV = "development"
+streamlit run dashboard.py
+```
+
+Para concluir uma recuperação de senha DEV, abra outra janela PowerShell na
+pasta do projeto e execute:
+
+```powershell
+python recuperar_senha_dev.py
+```
+
+O utilitário atende `http://localhost:3000` exclusivamente no loopback local.
+Com ele em execução, solicite um novo link em **Authentication > Users >
+conta B > Send password recovery**, abra o e-mail e defina a senha na página
+local. Links de recuperação expiram em 60 minutos. Depois entre no dashboard
+DEV em `http://127.0.0.1:8501`.
+
+Na hospedagem de produção, configure secrets independentes:
 
 ```toml
 MI_ENV = "production"
-SUPABASE_URL = "https://<project-id>.supabase.co"
-SUPABASE_ANON_KEY = "<publishable-or-anon-key>"
+SUPABASE_PROD_URL = "https://<prod-project-id>.supabase.co"
+SUPABASE_PROD_ANON_KEY = "<chave-publishable-da-producao>"
 ```
 
-Para demonstração local, configure apenas `MI_ENV = "local"` em
-`.streamlit/secrets.toml` (não versionar esse arquivo) ou na variável de
-ambiente equivalente. O aplicativo falha fechado se `MI_ENV` não estiver
-definido ou se as credenciais Supabase de produção estiverem ausentes.
+O app exige apenas as credenciais do ambiente selecionado: DEV não usa as
+credenciais de PROD. Os nomes legados `SUPABASE_URL` e
+`SUPABASE_ANON_KEY` continuam aceitos somente em `MI_ENV=production` para
+manter a configuração atual do piloto até a migração planejada dos secrets.
+Para demonstração apenas com CSV, configure `MI_ENV = "local"` sem credenciais
+Supabase. Nunca use a chave `service_role` no app.
+
+Não copie os secrets de DEV para a hospedagem de produção. Mantenha cada URL e
+chave no respectivo ambiente e confirme o valor de `MI_ENV` antes de executar
+importações.
 
 ## Antes de importar dados reais
 
+- Confirmar o login da conta B na interface Streamlit em `http://127.0.0.1:8501`.
+- Manter `recuperar_senha_dev.py` rodando apenas durante a recuperação da
+  senha, e encerrá-lo com `Ctrl+C` depois.
+- A validação dinâmica RLS foi concluída no DEV com as duas contas. Foram
+  aprovadas 70 verificações de leitura, inserção, atualização e exclusão
+  cruzadas nas cinco tabelas de negócio; os registros sentinela foram
+  removidos. Repita essa validação se alterar policies, memberships ou o
+  caminho de persistência.
 - Validar leitura, importação, atualização por chave, histórico e isolamento
   entre usuários no serviço hospedado.
 - Planejar cópias de segurança, restauração e retenção dos dados.

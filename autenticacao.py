@@ -30,6 +30,24 @@ def _configuracao(nome: str) -> str | None:
     return str(valor_segredo) if valor_segredo else None
 
 
+def _credenciais_supabase(ambiente: str) -> tuple[str | None, str | None]:
+    if ambiente == "development":
+        prefixo = "SUPABASE_DEV"
+    elif ambiente == "production":
+        prefixo = "SUPABASE_PROD"
+    else:
+        raise ValueError(f"Ambiente Supabase não suportado: {ambiente!r}.")
+
+    url = _configuracao(f"{prefixo}_URL")
+    chave_anonima = _configuracao(f"{prefixo}_ANON_KEY")
+
+    if ambiente == "production":
+        url = url or _configuracao("SUPABASE_URL")
+        chave_anonima = chave_anonima or _configuracao("SUPABASE_ANON_KEY")
+
+    return url, chave_anonima
+
+
 def _limpar_sessao() -> None:
     for chave in _CHAVES_SESSAO:
         st.session_state.pop(chave, None)
@@ -42,8 +60,12 @@ def obter_cliente_supabase(*, recriar: bool = False) -> Client:
 
     access_token = st.session_state.get("_mi_supabase_access_token")
     refresh_token = st.session_state.get("_mi_supabase_refresh_token")
-    url = _configuracao("SUPABASE_URL")
-    chave_anonima = _configuracao("SUPABASE_ANON_KEY")
+    ambiente = _configuracao("MI_ENV")
+    if ambiente not in {"development", "production"}:
+        raise RuntimeError(
+            "A sessão Supabase requer MI_ENV='development' ou 'production'."
+        )
+    url, chave_anonima = _credenciais_supabase(ambiente)
     if not access_token or not refresh_token or not url or not chave_anonima:
         raise RuntimeError(
             "A sessão Supabase não está autenticada. Entre novamente."
@@ -96,8 +118,12 @@ def _renderizar_login(cliente: Client) -> None:
         resposta = cliente.auth.sign_in_with_password(
             {"email": email, "password": senha}
         )
-    except AuthApiError:
-        st.error("Não foi possível autenticar. Confira seus dados de acesso.")
+    except AuthApiError as erro:
+        st.error(
+            "O Supabase recusou a autenticação: "
+            f"{erro.message} "
+            f"(HTTP {erro.status}, código {erro.code or 'indisponível'})."
+        )
         return
 
     if resposta.session is None or resposta.user is None:
@@ -120,10 +146,10 @@ def exigir_autenticacao() -> None:
     """Bloqueia o painel até existir uma sessão Supabase autorizada."""
 
     ambiente = _configuracao("MI_ENV")
-    if ambiente not in {"local", "production"}:
+    if ambiente not in {"local", "development", "production"}:
         st.error(
-            "Configure MI_ENV explicitamente como 'local' para demonstração "
-            "ou 'production' para exigir login."
+            "Configure MI_ENV explicitamente como 'local', 'development' "
+            "ou 'production'."
         )
         st.stop()
 
@@ -133,12 +159,16 @@ def exigir_autenticacao() -> None:
         )
         return
 
-    url = _configuracao("SUPABASE_URL")
-    chave_anonima = _configuracao("SUPABASE_ANON_KEY")
+    url, chave_anonima = _credenciais_supabase(ambiente)
     if not url or not chave_anonima:
+        prefixo = (
+            "SUPABASE_DEV"
+            if ambiente == "development"
+            else "SUPABASE_PROD"
+        )
         st.error(
-            "A autenticação de produção não está configurada. Defina "
-            "SUPABASE_URL e SUPABASE_ANON_KEY nos segredos do aplicativo."
+            f"A autenticação de {ambiente} não está configurada. Defina "
+            f"{prefixo}_URL e {prefixo}_ANON_KEY nos segredos do aplicativo."
         )
         st.stop()
 

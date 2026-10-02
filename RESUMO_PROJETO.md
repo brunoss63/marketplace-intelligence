@@ -14,8 +14,33 @@ sincronizadas periodicamente.
 
 - O painel está funcional como piloto privado em Streamlit e ainda é acessado
   localmente. A aplicação não foi publicada para acesso externo.
-- O repositório Git local foi inicializado na branch `main`; ainda não há
-  commits nem repositório remoto no GitHub.
+- O repositório Git local está na branch `main` e já tem um commit inicial;
+  ainda não há repositório remoto no GitHub.
+- O projeto Supabase `marketplace-intelligence-dev` foi criado separado do
+  piloto, na região São Paulo. O schema e as políticas RLS foram aplicados,
+  há uma conta de teste confirmada por tenant, e o cadastro público está
+  desativado. A conta B atual está vinculada ao seu próprio tenant; uma conta
+  provisória criada com o endereço de teste anterior permanece sem vínculo no
+  DEV.
+- O app aceita `MI_ENV=development` e as credenciais DEV estão no
+  `.streamlit/secrets.toml` local, sem substituir as credenciais do piloto.
+  Os logins das contas A e B foram confirmados no app local. A conta B também
+  foi autenticada diretamente no Auth API após redefinir a senha. O login B
+  inicialmente falhava porque o `MI_ENV` dos secrets locais ainda estava como
+  `production`; o valor foi corrigido para `development` e o app reiniciado.
+  O teste dinâmico de isolamento RLS entre A e B também foi concluído no DEV.
+- O app de desenvolvimento foi iniciado em `127.0.0.1:8501`, limitado à
+  máquina local. Um processo anterior que escutava em todas as interfaces foi
+  encerrado. O projeto Supabase do piloto não foi alterado.
+- O URL padrão de recuperação do Supabase DEV era `http://localhost:3000`.
+  Foi criado e iniciado `recuperar_senha_dev.py`, um callback local limitado
+  ao loopback. O primeiro fluxo de recuperação foi concluído, mas a senha
+  resultante continuou sem autenticar. A conta B foi então atualizada e
+  autenticada diretamente no projeto DEV por um utilitário local descartável.
+  A divergência seguinte no app foi resolvida ao corrigir `MI_ENV` de
+  `production` para `development` nos secrets locais.
+- As alterações da separação DEV/PROD e do callback local estão sendo
+  registradas no repositório Git local; ainda não há remoto no GitHub.
 - As telas incluem visão geral, vendas e pedidos, marketplaces, produtos e
   estoque, inteligência e importação.
 - O Supabase está configurado para autenticação, vínculo usuário/tenant,
@@ -29,9 +54,12 @@ sincronizadas periodicamente.
   inválidos nos campos examinados.
 - Leituras Supabase usam cache de até 30 segundos, invalidado após importações.
   Isso melhora a navegação, mas não fornece atualização em tempo real.
-- Autenticação, filtro por tenant e políticas RLS estão implementados. A
-  inspeção do código e do schema foi coerente com o isolamento esperado, mas o
-  teste dinâmico de acesso cruzado entre dois tenants ainda não foi concluído.
+- Autenticação, filtro por tenant e políticas RLS estão implementados. O teste
+  dinâmico real com as contas A e B passou em 70 verificações nas tabelas de
+  produtos, pedidos, estoque, publicidade e histórico de importações: cada
+  conta leu seus registros, não leu registros alheios, não conseguiu inserir,
+  alterar ou excluir dados do outro tenant, e os registros sentinela foram
+  removidos ao final.
 
 ## Estrutura do projeto
 
@@ -118,8 +146,9 @@ tendência correta ao filtrar por produto.
 
 ## Próximas etapas recomendadas
 
-1. **Validar isolamento entre tenants** em ambiente seguro, comprovando com duas
-   identidades que cada usuário só consegue acessar os dados do próprio tenant.
+1. **Registrar as alterações locais** e configurar um remoto GitHub antes de
+   automatizar os deploys. O remoto não é pré-requisito para desenvolver ou
+   validar o DEV.
 2. **Preparar e publicar o app web** em um serviço de hospedagem, mantendo o
    acesso privado e configurando segredos fora do código, HTTPS e domínio.
 3. **Planejar a integração inicial com um marketplace**, começando pelo Mercado
