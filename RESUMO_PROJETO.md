@@ -12,12 +12,18 @@ sincronizadas periodicamente.
 
 ## Estado atual — 2 de outubro de 2026
 
-- O painel está funcional como piloto privado em Streamlit e ainda é acessado
-  localmente. A aplicação não foi publicada para acesso externo.
-- O repositório Git está na branch `main`, com o remoto privado
+- O painel está funcional como piloto em Streamlit. Além do acesso local, foi
+  publicado para validação no Streamlit Community Cloud em
+  `https://marketplace-intelligence-dev.streamlit.app/`, conectado somente
+  ao Supabase DEV. O URL é público, mas o painel exige login Supabase, o
+  cadastro público está desativado e o RLS limita dados por tenant. Os logins
+  hospedados das contas A e B foram confirmados.
+- O repositório Git está na branch `main`, com o remoto público
   `https://github.com/brunoss63/marketplace-intelligence`. O commit inicial e
   a configuração DEV/PROD já foram enviados ao GitHub; a branch local acompanha
-  `origin/main`.
+  `origin/main`. O repositório foi tornado público a pedido do usuário para
+  permitir a implantação no Community Cloud; qualquer pessoa pode ver e copiar
+  o código e o histórico.
 - O projeto Supabase `marketplace-intelligence-dev` foi criado separado do
   piloto, na região São Paulo. O schema e as políticas RLS foram aplicados,
   há uma conta de teste confirmada por tenant, e o cadastro público está
@@ -34,6 +40,10 @@ sincronizadas periodicamente.
 - O app de desenvolvimento foi iniciado em `127.0.0.1:8501`, limitado à
   máquina local. Um processo anterior que escutava em todas as interfaces foi
   encerrado. O projeto Supabase do piloto não foi alterado.
+- A hospedagem usa somente as credenciais do projeto DEV nos secrets
+  criptografados do Streamlit Cloud; nenhum secret de produção foi configurado.
+  A implantação acompanha `main`, então novos commits nessa branch podem
+  atualizar automaticamente o app hospedado.
 - O URL padrão de recuperação do Supabase DEV era `http://localhost:3000`.
   Foi criado e iniciado `recuperar_senha_dev.py`, um callback local limitado
   ao loopback. O primeiro fluxo de recuperação foi concluído, mas a senha
@@ -148,15 +158,17 @@ tendência correta ao filtrar por produto.
 
 ## Próximas etapas recomendadas
 
-1. **Preparar e publicar o app web** em um serviço de hospedagem, mantendo o
-   acesso privado e configurando segredos fora do código, HTTPS e domínio.
+1. **Manter o app hospedado em validação** com login Supabase, cadastro público
+   desativado e RLS. Os logins A/B já foram confirmados. O Community Cloud
+   serve à validação; para operação comercial, avaliar uma hospedagem/plano
+   apropriado antes de usar dados reais de clientes.
 2. **Planejar a integração inicial com um marketplace**, começando pelo Mercado
    Livre, já usado no piloto. Registrar a aplicação, implementar OAuth e
    armazenar/renovar tokens com segurança.
 3. **Automatizar a ingestão** conforme os recursos da API: webhooks quando
    disponíveis e sincronização periódica nos demais casos, com tratamento de
    limites, falhas, repetição e duplicidades.
-4. **Validar a operação hospedada**: importações e atualizações, expiração e
+4. **Validar a operação de produção**: importações e atualizações, expiração e
    revogação de acesso, backups e restauração, monitoramento e desempenho.
 5. **Ampliar para outros marketplaces** após validar a integração inicial com
    dados e uso reais.

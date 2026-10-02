@@ -38,6 +38,15 @@ via Auth API e pela interface Streamlit. O app está rodando somente em
 trabalhar contra o DEV; `production` no arquivo local causou a falha de login
 da conta B e foi corrigido.
 
+O app também foi publicado para validação no Streamlit Community Cloud em
+`https://marketplace-intelligence-dev.streamlit.app/`, ligado somente ao
+projeto Supabase DEV. O endereço é público; os dados continuam protegidos pelo
+login Supabase, cadastro público desativado e policies RLS. Os secrets da
+hospedagem contêm apenas a configuração DEV. O deploy acompanha `main` do
+GitHub, portanto commits enviados a essa branch podem atualizar a implantação.
+Os logins hospedados das contas A e B foram confirmados. Não use esse deploy de
+Community Cloud como ambiente de produção comercial.
+
 O URL de recuperação padrão do Supabase DEV estava configurado como
 `http://localhost:3000`, onde não havia um servidor. O utilitário local
 `recuperar_senha_dev.py` atende esse endereço somente na máquina local,
