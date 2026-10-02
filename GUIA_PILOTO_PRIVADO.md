@@ -47,57 +47,32 @@ GitHub, portanto commits enviados a essa branch podem atualizar a implantação.
 Os logins hospedados das contas A e B foram confirmados. Não use esse deploy de
 Community Cloud como ambiente de produção comercial.
 
-## Adicionar um usuário ao piloto gratuito
+## Preparação antes de convidar o primeiro cliente
 
-Para permitir que um amigo teste o app com dados da loja dele sem compartilhar
-os tenants de teste:
+O usuário do amigo e seu tenant **não devem ser criados ainda**. A apresentação
+e o convite ficam para depois que as integrações de Mercado Livre e Shopee
+estiverem implementadas e testadas em DEV, e que o acesso administrativo entre
+tenants tenha sido criado com auditoria.
 
-1. No Supabase DEV, abra **Authentication > Users** e crie/invite o usuário
-   usando o e-mail dele. Ele deve definir a própria senha pelo fluxo do Supabase;
-   não compartilhe a senha das contas A/B.
-2. No **SQL Editor** do projeto DEV, execute o bloco abaixo após substituir
-   e-mail, nome e slug pelos valores da loja. O slug deve ser único e conter
-   somente letras minúsculas, números e hífens.
-3. Peça para ele entrar em
-   `https://marketplace-intelligence-dev.streamlit.app/`. A conta precisa estar
-   vinculada a exatamente um tenant; o app bloqueia o acesso se isso não for
-   verdade.
-4. Antes de importar arquivos reais, confira se não contêm dados pessoais de
-   compradores que não sejam necessários para os indicadores. Mantenha os
-   arquivos originais com o dono da loja.
+O responsável pelo produto solicitou acesso administrativo aos tenants. Hoje
+as policies RLS só permitem a cada conta consultar o tenant ao qual está
+vinculada; não há acesso global de administrador nem auditoria desse acesso.
+Não use chaves `service_role` no navegador ou na aplicação Streamlit para
+contornar esse isolamento. A futura implementação deve definir uma identidade
+administrativa explícita, registrar consultas e alterações administrativas e
+manter bloqueado o acesso cruzado para usuários clientes.
 
-```sql
-do $$
-declare
-    friend_user_id uuid;
-    friend_tenant_id uuid;
-begin
-    select id into strict friend_user_id
-    from auth.users
-    where lower(email) = lower('EMAIL_DO_AMIGO');
+Mercado Livre e Shopee estão no escopo. O responsável concordou em criar
+contas próprias de desenvolvedor/teste, mas ainda não há aplicações, credenciais
+nem conexão real. Não conecte a loja do amigo antes da autorização dele.
+Webhooks/notificações, sincronização periódica e frequência alcançável devem
+ser determinados e validados separadamente para cada API; não prometa
+atualização em tempo real sem evidência.
 
-    if exists (
-        select 1
-        from public.tenant_members
-        where user_id = friend_user_id
-    ) then
-        raise exception 'Este usuário já possui um vínculo com tenant';
-    end if;
-
-    insert into public.tenants (name, slug)
-    values ('NOME_DA_LOJA', 'slug-unico-da-loja')
-    returning id into friend_tenant_id;
-
-    insert into public.tenant_members (tenant_id, user_id, role)
-    values (friend_tenant_id, friend_user_id, 'owner');
-end
-$$;
-```
-
-Este é um piloto gratuito no Supabase DEV e no Streamlit Community Cloud, não
-um ambiente com garantias de produção. Use somente com o consentimento do dono
-da loja, mantenha cópias dos arquivos de origem fora do app e não dependa dele
-como único armazenamento dos dados. Os limites, disponibilidade e recursos dos
+O Streamlit Community Cloud e o Supabase DEV são ambientes gratuitos de piloto,
+sem garantias de produção. Só usar dados reais após revisar o conteúdo e
+necessidade dos dados importados, obter autorização do dono da loja, e manter
+cópias de segurança independentes. Os limites, disponibilidade e recursos dos
 planos gratuitos podem mudar.
 
 O URL de recuperação padrão do Supabase DEV estava configurado como

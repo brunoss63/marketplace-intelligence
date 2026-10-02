@@ -45,10 +45,19 @@ sincronizadas periodicamente.
   A implantação acompanha `main`, então novos commits nessa branch podem
   atualizar automaticamente o app hospedado.
 - Foi escolhido preparar um piloto gratuito e limitado para um amigo usar com
-  dados reais da loja, sem criar recursos pagos. O onboarding documentado cria
-  um usuário Supabase e um tenant exclusivo no DEV; a conta ainda não foi
-  criada nem recebeu dados. O Community Cloud e o plano gratuito do Supabase
-  não oferecem garantias de produção, e os limites podem mudar.
+  dados reais da loja, sem criar recursos pagos. O cadastro do amigo e a
+  apresentação ficam adiados até as integrações de Mercado Livre e Shopee e a
+  sincronização terem sido implementadas e testadas. Nenhuma conta dele foi
+  criada nem recebeu dados. O proprietário do produto precisará de acesso
+  administrativo entre tenants, restrito e auditável; hoje o RLS só autoriza
+  acesso ao tenant vinculado à própria conta, então esse acesso administrativo
+  ainda não existe.
+- O usuário concordou em criar contas próprias de desenvolvedor/teste para
+  Mercado Livre e Shopee. Nenhuma conta de teste ou aplicação de desenvolvedor
+  foi criada ainda; não há credenciais para validar OAuth/API. “Tempo real”
+  não está garantido: a frequência dependerá de notificações/webhooks e dos
+  limites de cada plataforma, além de um mecanismo de sincronização ativo.
+  O Community Cloud e os planos gratuitos não oferecem garantias de produção.
 - O URL padrão de recuperação do Supabase DEV era `http://localhost:3000`.
   Foi criado e iniciado `recuperar_senha_dev.py`, um callback local limitado
   ao loopback. O primeiro fluxo de recuperação foi concluído, mas a senha
@@ -163,20 +172,24 @@ tendência correta ao filtrar por produto.
 
 ## Próximas etapas recomendadas
 
-1. **Manter o app hospedado em validação** com login Supabase, cadastro público
-   desativado e RLS. Os logins A/B já foram confirmados. O Community Cloud
-   serve à validação; para operação comercial, avaliar uma hospedagem/plano
-   apropriado antes de usar dados reais de clientes.
-2. **Planejar a integração inicial com um marketplace**, começando pelo Mercado
-   Livre, já usado no piloto. Registrar a aplicação, implementar OAuth e
-   armazenar/renovar tokens com segurança.
-3. **Automatizar a ingestão** conforme os recursos da API: webhooks quando
-   disponíveis e sincronização periódica nos demais casos, com tratamento de
-   limites, falhas, repetição e duplicidades.
-4. **Validar a operação de produção**: importações e atualizações, expiração e
-   revogação de acesso, backups e restauração, monitoramento e desempenho.
-5. **Ampliar para outros marketplaces** após validar a integração inicial com
-   dados e uso reais.
+1. **Criar contas próprias de desenvolvedor/teste** nas plataformas Mercado
+   Livre e Shopee e registrar as aplicações, sem conectar ainda a loja do amigo.
+2. **Implementar e validar Mercado Livre em DEV**: OAuth, armazenamento e
+   renovação segura de tokens, ingestão idempotente e notificações/webhooks ou
+   sincronização periódica, conforme permitido pela API.
+3. **Implementar e validar Shopee em DEV** com os mesmos requisitos de
+   isolamento, renovação de credenciais, ingestão idempotente e atualização
+   automática suportada pela plataforma.
+4. **Criar administração entre tenants com auditoria**: autorização explícita,
+   acesso mínimo necessário, trilha de consulta/alteração e teste de que
+   usuários clientes continuam isolados. Esse privilégio não existe hoje.
+5. **Executar uma validação de ponta a ponta**, incluindo falhas, limites de
+   API, revogação de acesso, reconexão e consistência dos dados.
+6. Só depois de concluir os itens anteriores, obter do amigo autorização e
+   dados necessários, criar a conta/tenant exclusivo dele e convidá-lo para
+   operar. O plano gratuito continua sendo piloto sem garantias de produção;
+   frequência de atualização não deve ser apresentada como tempo real até ser
+   medida e comprovada.
 
 ## Critério de chegada ao objetivo
 
