@@ -14,8 +14,10 @@ sincronizadas periodicamente.
 
 - O painel está funcional como piloto privado em Streamlit e ainda é acessado
   localmente. A aplicação não foi publicada para acesso externo.
-- O repositório Git local está na branch `main` e já tem um commit inicial;
-  ainda não há repositório remoto no GitHub.
+- O repositório Git está na branch `main`, com o remoto privado
+  `https://github.com/brunoss63/marketplace-intelligence`. O commit inicial e
+  a configuração DEV/PROD já foram enviados ao GitHub; a branch local acompanha
+  `origin/main`.
 - O projeto Supabase `marketplace-intelligence-dev` foi criado separado do
   piloto, na região São Paulo. O schema e as políticas RLS foram aplicados,
   há uma conta de teste confirmada por tenant, e o cadastro público está
@@ -39,8 +41,8 @@ sincronizadas periodicamente.
   autenticada diretamente no projeto DEV por um utilitário local descartável.
   A divergência seguinte no app foi resolvida ao corrigir `MI_ENV` de
   `production` para `development` nos secrets locais.
-- As alterações da separação DEV/PROD e do callback local estão sendo
-  registradas no repositório Git local; ainda não há remoto no GitHub.
+- O arquivo `.streamlit/secrets.toml` permanece ignorado pelo Git; somente o
+  modelo `.streamlit/secrets.toml.example` está versionado.
 - As telas incluem visão geral, vendas e pedidos, marketplaces, produtos e
   estoque, inteligência e importação.
 - O Supabase está configurado para autenticação, vínculo usuário/tenant,
@@ -146,20 +148,17 @@ tendência correta ao filtrar por produto.
 
 ## Próximas etapas recomendadas
 
-1. **Registrar as alterações locais** e configurar um remoto GitHub antes de
-   automatizar os deploys. O remoto não é pré-requisito para desenvolver ou
-   validar o DEV.
-2. **Preparar e publicar o app web** em um serviço de hospedagem, mantendo o
+1. **Preparar e publicar o app web** em um serviço de hospedagem, mantendo o
    acesso privado e configurando segredos fora do código, HTTPS e domínio.
-3. **Planejar a integração inicial com um marketplace**, começando pelo Mercado
+2. **Planejar a integração inicial com um marketplace**, começando pelo Mercado
    Livre, já usado no piloto. Registrar a aplicação, implementar OAuth e
    armazenar/renovar tokens com segurança.
-4. **Automatizar a ingestão** conforme os recursos da API: webhooks quando
+3. **Automatizar a ingestão** conforme os recursos da API: webhooks quando
    disponíveis e sincronização periódica nos demais casos, com tratamento de
    limites, falhas, repetição e duplicidades.
-5. **Validar a operação hospedada**: importações e atualizações, expiração e
+4. **Validar a operação hospedada**: importações e atualizações, expiração e
    revogação de acesso, backups e restauração, monitoramento e desempenho.
-6. **Ampliar para outros marketplaces** após validar a integração inicial com
+5. **Ampliar para outros marketplaces** após validar a integração inicial com
    dados e uso reais.
 
 ## Critério de chegada ao objetivo
