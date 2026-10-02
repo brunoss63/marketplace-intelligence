@@ -52,12 +52,16 @@ sincronizadas periodicamente.
   administrativo entre tenants, restrito e auditável; hoje o RLS só autoriza
   acesso ao tenant vinculado à própria conta, então esse acesso administrativo
   ainda não existe.
-- O usuário concordou em criar contas próprias de desenvolvedor/teste para
-  Mercado Livre e Shopee. Nenhuma conta de teste ou aplicação de desenvolvedor
-  foi criada ainda; não há credenciais para validar OAuth/API. “Tempo real”
-  não está garantido: a frequência dependerá de notificações/webhooks e dos
-  limites de cada plataforma, além de um mecanismo de sincronização ativo.
-  O Community Cloud e os planos gratuitos não oferecem garantias de produção.
+- Mercado Livre e Shopee estão no escopo para a futura integração. O usuário
+  informou que não possui conta própria no Mercado Livre e pediu para pausar
+  antes de iniciar o cadastro. Nenhuma conta de teste ou aplicação de
+  desenvolvedor foi criada; não há credenciais para validar OAuth/API. Ponto
+  de retomada: criar primeiro uma conta própria no Mercado Livre, depois
+  registrar a aplicação e preparar contas/testes; fazer o mesmo para Shopee.
+  “Tempo real” não está garantido: a frequência dependerá de
+  notificações/webhooks e dos limites de cada plataforma, além de um mecanismo
+  de sincronização ativo. O Community Cloud e os planos gratuitos não oferecem
+  garantias de produção.
 - O URL padrão de recuperação do Supabase DEV era `http://localhost:3000`.
   Foi criado e iniciado `recuperar_senha_dev.py`, um callback local limitado
   ao loopback. O primeiro fluxo de recuperação foi concluído, mas a senha
@@ -172,8 +176,10 @@ tendência correta ao filtrar por produto.
 
 ## Próximas etapas recomendadas
 
-1. **Criar contas próprias de desenvolvedor/teste** nas plataformas Mercado
-   Livre e Shopee e registrar as aplicações, sem conectar ainda a loja do amigo.
+1. **Retomar pelo cadastro de conta própria** no Mercado Livre (ainda não
+   iniciada), depois registrar uma aplicação e criar/obter recursos de teste.
+   Em seguida, cadastrar-se na Shopee Open Platform e registrar sua aplicação.
+   Não conectar ainda a loja do amigo.
 2. **Implementar e validar Mercado Livre em DEV**: OAuth, armazenamento e
    renovação segura de tokens, ingestão idempotente e notificações/webhooks ou
    sincronização periódica, conforme permitido pela API.

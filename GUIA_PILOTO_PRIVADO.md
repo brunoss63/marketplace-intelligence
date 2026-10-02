@@ -62,12 +62,19 @@ contornar esse isolamento. A futura implementação deve definir uma identidade
 administrativa explícita, registrar consultas e alterações administrativas e
 manter bloqueado o acesso cruzado para usuários clientes.
 
-Mercado Livre e Shopee estão no escopo. O responsável concordou em criar
-contas próprias de desenvolvedor/teste, mas ainda não há aplicações, credenciais
-nem conexão real. Não conecte a loja do amigo antes da autorização dele.
-Webhooks/notificações, sincronização periódica e frequência alcançável devem
-ser determinados e validados separadamente para cada API; não prometa
-atualização em tempo real sem evidência.
+Mercado Livre e Shopee estão no escopo. A preparação está pausada antes de
+qualquer cadastro, a pedido do responsável pelo produto, que informou não ter
+conta própria no Mercado Livre. O portal de desenvolvedores foi aberto e pediu
+autenticação; nenhum login, cadastro ou aplicação foi realizado. **Próximo
+passo ao retomar:** criar uma conta própria no Mercado Livre, entrar no portal
+de desenvolvedores e registrar uma aplicação; depois preparar recursos de
+teste e repetir o processo na Shopee Open Platform. Não conectar a loja do
+amigo antes de obter sua autorização.
+
+Ainda não há aplicações, credenciais nem conexão real. Webhooks/notificações,
+sincronização periódica e frequência alcançável devem ser determinados e
+validados separadamente para cada API; não prometa atualização em tempo real
+sem evidência.
 
 O Streamlit Community Cloud e o Supabase DEV são ambientes gratuitos de piloto,
 sem garantias de produção. Só usar dados reais após revisar o conteúdo e
