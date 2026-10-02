@@ -1,0 +1,31 @@
+﻿id_pedido,data,marketplace,sku,produto,quantidade,preco_unitario,faturamento_bruto,desconto,taxa_marketplace,frete_vendedor,status
+2000000001,2026-09-19,Mercado Livre,ML-002,Suporte Veicular Magnético,1.0,59.9,59.9,15.0,5.84,12.9,Concluído
+2000000002,2026-09-22,Mercado Livre,ML-002,Suporte Veicular Magnético,2.0,59.9,119.8,0.0,14.38,0.0,Concluído
+2000000003,2026-09-29,Mercado Livre,ML-001,Fone Bluetooth Pro,1.0,129.9,129.9,15.0,16.09,21.9,Concluído
+2000000004,2026-09-23,Mercado Livre,ML-005,Cabo USB-C 2m,1.0,39.9,39.9,0.0,5.59,21.9,Concluído
+2000000005,2026-09-26,Mercado Livre,ML-004,Teclado Mecânico RGB,1.0,219.9,219.9,0.0,26.39,21.9,Concluído
+2000000006,2026-09-17,Mercado Livre,ML-005,Cabo USB-C 2m,1.0,39.9,39.9,15.0,3.24,0.0,Concluído
+2000000007,2026-09-22,Mercado Livre,ML-005,Cabo USB-C 2m,1.0,39.9,39.9,10.0,3.59,0.0,Concluído
+2000000008,2026-09-26,Mercado Livre,ML-002,Suporte Veicular Magnético,1.0,59.9,59.9,0.0,7.79,16.9,Concluído
+2000000009,2026-09-17,Mercado Livre,ML-006,Webcam Full HD,1.0,179.9,179.9,0.0,25.19,16.9,Concluído
+2000000010,2026-09-22,Mercado Livre,ML-003,Mouse Sem Fio Ergo,1.0,89.9,89.9,0.0,11.69,21.9,Concluído
+2000000011,2026-09-23,Mercado Livre,ML-006,Webcam Full HD,1.0,179.9,179.9,0.0,21.59,16.9,Concluído
+2000000012,2026-09-29,Mercado Livre,ML-004,Teclado Mecânico RGB,1.0,219.9,219.9,0.0,30.79,21.9,Concluído
+2000000013,2026-09-28,Mercado Livre,ML-005,Cabo USB-C 2m,1.0,39.9,39.9,0.0,5.59,16.9,Cancelado
+2000000014,2026-09-16,Mercado Livre,ML-007,Carregador Turbo 30W,1.0,79.9,79.9,0.0,9.59,21.9,Concluído
+2000000015,2026-09-27,Mercado Livre,ML-003,Mouse Sem Fio Ergo,1.0,89.9,89.9,15.0,9.74,0.0,Concluído
+2000000016,2026-09-23,Mercado Livre,ML-008,Hub USB 4 Portas,1.0,99.9,99.9,10.0,10.79,0.0,Concluído
+2000000017,2026-09-15,Mercado Livre,ML-006,Webcam Full HD,1.0,179.9,179.9,0.0,23.39,12.9,Concluído
+2000000018,2026-09-26,Mercado Livre,ML-003,Mouse Sem Fio Ergo,1.0,89.9,89.9,15.0,9.74,12.9,Concluído
+2000000019,2026-09-24,Mercado Livre,ML-001,Fone Bluetooth Pro,1.0,129.9,129.9,5.0,14.99,0.0,Concluído
+2000000020,2026-09-30,Mercado Livre,ML-001,Fone Bluetooth Pro,1.0,129.9,129.9,10.0,14.39,0.0,Cancelado
+2000000021,2026-10-01,Mercado Livre,ML-003,Mouse Sem Fio Ergo,1.0,89.9,89.9,15.0,9.74,12.9,Concluído
+2000000022,2026-09-24,Mercado Livre,ML-007,Carregador Turbo 30W,1.0,79.9,79.9,10.0,9.79,12.9,Concluído
+2000000023,2026-09-22,Mercado Livre,ML-006,Webcam Full HD,2.0,179.9,359.8,10.0,45.47,0.0,Concluído
+2000000024,2026-09-22,Mercado Livre,ML-006,Webcam Full HD,1.0,179.9,179.9,10.0,23.79,12.9,Concluído
+2000000025,2026-09-17,Mercado Livre,ML-002,Suporte Veicular Magnético,1.0,59.9,59.9,0.0,7.19,0.0,Concluído
+2000000026,2026-09-19,Mercado Livre,ML-004,Teclado Mecânico RGB,1.0,219.9,219.9,15.0,26.64,12.9,Concluído
+2000000027,2026-09-18,Mercado Livre,ML-008,Hub USB 4 Portas,1.0,99.9,99.9,5.0,12.34,12.9,Concluído
+2000000028,2026-09-16,Mercado Livre,ML-007,Carregador Turbo 30W,1.0,79.9,79.9,5.0,9.74,21.9,Cancelado
+2000000029,2026-09-22,Mercado Livre,ML-002,Suporte Veicular Magnético,1.0,59.9,59.9,5.0,7.69,16.9,Concluído
+2000000030,2026-09-29,Mercado Livre,ML-004,Teclado Mecânico RGB,2.0,219.9,439.8,0.0,57.17,12.9,Concluído

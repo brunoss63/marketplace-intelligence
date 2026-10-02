@@ -1,0 +1,14 @@
+.streamlit/secrets.toml
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Imported source files and local import history may contain customer data
+/dados/importacoes/
