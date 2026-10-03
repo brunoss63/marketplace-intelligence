@@ -280,6 +280,47 @@ def _token_da_resposta(dados: Any) -> dict[str, str | int]:
     }
 
 
+def _mensagem_erro_oauth(status_code: int, corpo: Any) -> str:
+    codigo = corpo.get("error") if isinstance(corpo, dict) else None
+    if (
+        not isinstance(codigo, str)
+        or not codigo
+        or len(codigo) > 80
+        or not all(
+            caractere.isalnum() or caractere in "._-"
+            for caractere in codigo
+        )
+    ):
+        codigo = None
+
+    mensagem = (
+        "O Mercado Livre recusou a solicitação OAuth "
+        f"(HTTP {status_code}"
+    )
+    if codigo:
+        mensagem += f", código {codigo}"
+    mensagem += ")."
+
+    orientacoes = {
+        "invalid_grant": (
+            " O código pode ter expirado ou já ter sido usado; se ocorrer "
+            "novamente, confira também a URI de redirecionamento e o PKCE."
+        ),
+        "invalid_client": (
+            " Confira se o Client ID e o Client Secret atuais pertencem ao "
+            "mesmo aplicativo e estão atualizados nos secrets do Streamlit."
+        ),
+        "invalid_request": (
+            " Confira a configuração do fluxo OAuth e a URI de "
+            "redirecionamento cadastrada."
+        ),
+        "unauthorized_client": (
+            " Confira se o aplicativo permite o fluxo Authorization Code."
+        ),
+    }
+    return mensagem + orientacoes.get(codigo, "")
+
+
 def _solicitar_token(dados: dict[str, str]) -> dict[str, str | int]:
     try:
         resposta = requests.post(
@@ -308,8 +349,7 @@ def _solicitar_token(dados: dict[str, str]) -> dict[str, str | int]:
         ) from erro
     if not resposta.ok:
         raise RuntimeError(
-            "O Mercado Livre recusou a solicitação OAuth "
-            f"(HTTP {resposta.status_code})."
+            _mensagem_erro_oauth(resposta.status_code, corpo)
         )
     return _token_da_resposta(corpo)
 

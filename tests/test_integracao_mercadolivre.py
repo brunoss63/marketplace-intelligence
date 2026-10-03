@@ -151,6 +151,28 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
             timeout=(5, 15),
         )
 
+    @patch("integracao_mercadolivre.requests.post")
+    def test_rejeicao_oauth_exibe_codigo_sem_detalhes_brutos(
+        self,
+        post: Mock,
+    ) -> None:
+        resposta = Mock()
+        resposta.ok = False
+        resposta.status_code = 400
+        resposta.json.return_value = {
+            "error": "invalid_grant",
+            "error_description": "sensitive-provider-details",
+        }
+        post.return_value = resposta
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "HTTP 400, código invalid_grant",
+        ) as contexto:
+            integracao._solicitar_token({"grant_type": "authorization_code"})
+
+        self.assertNotIn("sensitive-provider-details", str(contexto.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
