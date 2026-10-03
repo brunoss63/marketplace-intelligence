@@ -57,7 +57,7 @@ def _obter_configuracao_ml() -> dict[str, str]:
         "token_encryption_key": "MERCADOLIVRE_DEV_TOKEN_ENCRYPTION_KEY",
     }
     configuracao = {
-        chave: obter_configuracao(nome)
+        chave: obter_configuracao(nome, preferir_secrets=True)
         for chave, nome in nomes.items()
     }
     ausentes = [
@@ -323,13 +323,18 @@ def _mensagem_erro_oauth(status_code: int, corpo: Any) -> str:
 
 
 def _diagnostico_invalid_client() -> str:
-    client_id = obter_configuracao("MERCADOLIVRE_DEV_CLIENT_ID")
+    client_id = obter_configuracao(
+        "MERCADOLIVRE_DEV_CLIENT_ID",
+        preferir_secrets=True,
+    )
     id_corresponde = client_id == _CLIENT_ID_APLICACAO_DEV
     origem_client_id = obter_origem_configuracao(
-        "MERCADOLIVRE_DEV_CLIENT_ID"
+        "MERCADOLIVRE_DEV_CLIENT_ID",
+        preferir_secrets=True,
     )
     origem_client_secret = obter_origem_configuracao(
-        "MERCADOLIVRE_DEV_CLIENT_SECRET"
+        "MERCADOLIVRE_DEV_CLIENT_SECRET",
+        preferir_secrets=True,
     )
     return (
         " Diagnóstico seguro: Client ID lido de "

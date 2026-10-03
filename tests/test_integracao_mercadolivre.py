@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from cryptography.fernet import Fernet
 
+import autenticacao
 import integracao_mercadolivre as integracao
 
 
@@ -49,10 +50,19 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
                 Fernet.generate_key().decode("ascii")
             ),
         }
+        def obter_valor_configuracao(
+            nome: str,
+            *,
+            preferir_secrets: bool = False,
+        ) -> str | None:
+            if nome != "MI_ENV":
+                self.assertTrue(preferir_secrets)
+            return valores.get(nome)
+
         with patch.object(
             integracao,
             "obter_configuracao",
-            side_effect=valores.get,
+            side_effect=obter_valor_configuracao,
         ):
             configuracao = integracao._obter_configuracao_ml()
         self.assertEqual(
@@ -66,7 +76,7 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
         with patch.object(
             integracao,
             "obter_configuracao",
-            side_effect=valores.get,
+            side_effect=obter_valor_configuracao,
         ):
             with self.assertRaisesRegex(RuntimeError, "URL HTTPS fixa"):
                 integracao._obter_configuracao_ml()
@@ -185,7 +195,7 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
         obter_configuracao.return_value = "6066488581881437"
         obter_origem.side_effect = [
             "Streamlit Secrets",
-            "variável de ambiente",
+            "Streamlit Secrets",
         ]
         resposta = Mock()
         resposta.ok = False
@@ -201,8 +211,52 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
 
         mensagem = str(contexto.exception)
         self.assertIn("corresponde ao app DEV: sim", mensagem)
-        self.assertIn("Client Secret lido de variável de ambiente", mensagem)
+        self.assertIn("Client Secret lido de Streamlit Secrets", mensagem)
         self.assertNotIn("6066488581881437", mensagem)
+
+
+class TestPrioridadeSegredos(unittest.TestCase):
+    @patch.object(autenticacao, "_valor_segredo_streamlit")
+    @patch.object(autenticacao.os.environ, "get")
+    def test_streamlit_secrets_tem_prioridade_quando_solicitado(
+        self,
+        variavel_ambiente: Mock,
+        segredo_streamlit: Mock,
+    ) -> None:
+        variavel_ambiente.return_value = "valor-antigo"
+        segredo_streamlit.return_value = "valor-atual"
+
+        valor = autenticacao.obter_configuracao(
+            "MERCADOLIVRE_DEV_CLIENT_SECRET",
+            preferir_secrets=True,
+        )
+        origem = autenticacao.obter_origem_configuracao(
+            "MERCADOLIVRE_DEV_CLIENT_SECRET",
+            preferir_secrets=True,
+        )
+
+        self.assertEqual(valor, "valor-atual")
+        self.assertEqual(origem, "Streamlit Secrets")
+
+    @patch.object(autenticacao, "_valor_segredo_streamlit", return_value=None)
+    @patch.object(autenticacao.os.environ, "get", return_value="fallback")
+    def test_variavel_ambiente_continua_como_fallback(
+        self,
+        variavel_ambiente: Mock,
+        segredo_streamlit: Mock,
+    ) -> None:
+        valor = autenticacao.obter_configuracao(
+            "MERCADOLIVRE_DEV_CLIENT_SECRET",
+            preferir_secrets=True,
+        )
+
+        self.assertEqual(valor, "fallback")
+        variavel_ambiente.assert_called_once_with(
+            "MERCADOLIVRE_DEV_CLIENT_SECRET"
+        )
+        segredo_streamlit.assert_called_once_with(
+            "MERCADOLIVRE_DEV_CLIENT_SECRET"
+        )
 
 
 if __name__ == "__main__":

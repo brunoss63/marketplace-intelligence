@@ -76,9 +76,9 @@ usado é provisório.
 A implementação do fluxo OAuth DEV está em `integracao_mercadolivre.py`:
 state de uso único, PKCE S256, tokens criptografados no Supabase por tenant e
 renovação serializada do refresh token. A migração
-`supabase/migrations/20261003170000_mercadolivre_oauth.sql` ainda precisa ser
-aplicada somente no Supabase DEV. Também é necessário configurar, nos secrets
-locais e hospedados do DEV, `MERCADOLIVRE_DEV_CLIENT_ID`,
+`supabase/migrations/20261003170000_mercadolivre_oauth.sql` foi aplicada
+somente no Supabase DEV. Também é necessário configurar, nos secrets locais e
+hospedados do DEV, `MERCADOLIVRE_DEV_CLIENT_ID`,
 `MERCADOLIVRE_DEV_CLIENT_SECRET`, `MERCADOLIVRE_DEV_REDIRECT_URI` e uma chave
 Fernet persistente em `MERCADOLIVRE_DEV_TOKEN_ENCRYPTION_KEY`. O endereço de
 retorno precisa coincidir exatamente com o cadastrado no portal.
@@ -104,6 +104,8 @@ Falta configurar os secrets. Antes de reiniciar o app local:
    `.streamlit/secrets.toml` local e ao painel **Settings > Secrets** do app
    hospedado. Use o Client ID e Client Secret da aplicação criada no portal e
    como redirect exatamente `https://marketplace-intelligence-dev.streamlit.app/`.
+   Para as credenciais OAuth, o app hospedado prioriza esses Streamlit Secrets
+   sobre variáveis de ambiente de mesmo nome.
    Preserve todas as configurações existentes e não inclua esses valores no
    `.streamlit/secrets.toml.example`.
 3. Reinicie o app local e, na página **Marketplaces**, inicie a conexão.

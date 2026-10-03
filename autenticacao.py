@@ -17,18 +17,28 @@ _CHAVES_SESSAO = (
 )
 
 
-def _configuracao_com_origem(nome: str) -> tuple[str | None, str]:
-    valor_ambiente = os.environ.get(nome)
-    if valor_ambiente:
-        return valor_ambiente, "variável de ambiente"
-
+def _valor_segredo_streamlit(nome: str) -> str | None:
     try:
         valor_segredo = st.secrets.get(nome)
     except StreamlitSecretNotFoundError:
-        return None, "ausente"
+        return None
+    return str(valor_segredo) if valor_segredo else None
 
+
+def _configuracao_com_origem(
+    nome: str,
+    *,
+    preferir_secrets: bool = False,
+) -> tuple[str | None, str]:
+    valor_ambiente = os.environ.get(nome)
+    if valor_ambiente and not preferir_secrets:
+        return valor_ambiente, "variável de ambiente"
+
+    valor_segredo = _valor_segredo_streamlit(nome)
     if valor_segredo:
-        return str(valor_segredo), "Streamlit Secrets"
+        return valor_segredo, "Streamlit Secrets"
+    if valor_ambiente:
+        return valor_ambiente, "variável de ambiente"
     return None, "ausente"
 
 
@@ -36,16 +46,30 @@ def _configuracao(nome: str) -> str | None:
     return _configuracao_com_origem(nome)[0]
 
 
-def obter_configuracao(nome: str) -> str | None:
-    """Lê uma configuração primeiro do ambiente e depois dos secrets."""
+def obter_configuracao(
+    nome: str,
+    *,
+    preferir_secrets: bool = False,
+) -> str | None:
+    """Lê uma configuração do ambiente e dos Streamlit Secrets."""
 
-    return _configuracao(nome)
+    return _configuracao_com_origem(
+        nome,
+        preferir_secrets=preferir_secrets,
+    )[0]
 
 
-def obter_origem_configuracao(nome: str) -> str:
+def obter_origem_configuracao(
+    nome: str,
+    *,
+    preferir_secrets: bool = False,
+) -> str:
     """Informa a origem selecionada para uma configuração, sem seu valor."""
 
-    return _configuracao_com_origem(nome)[1]
+    return _configuracao_com_origem(
+        nome,
+        preferir_secrets=preferir_secrets,
+    )[1]
 
 
 def _credenciais_supabase(ambiente: str) -> tuple[str | None, str | None]:
