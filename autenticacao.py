@@ -30,6 +30,12 @@ def _configuracao(nome: str) -> str | None:
     return str(valor_segredo) if valor_segredo else None
 
 
+def obter_configuracao(nome: str) -> str | None:
+    """Lê uma configuração primeiro do ambiente e depois dos secrets."""
+
+    return _configuracao(nome)
+
+
 def _credenciais_supabase(ambiente: str) -> tuple[str | None, str | None]:
     if ambiente == "development":
         prefixo = "SUPABASE_DEV"

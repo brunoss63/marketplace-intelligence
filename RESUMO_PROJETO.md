@@ -10,7 +10,7 @@ automaticamente pedidos, produtos, estoque e publicidade.
 atualizações poderão chegar por notificações/webhooks; outras precisarão ser
 sincronizadas periodicamente.
 
-## Estado atual — 2 de outubro de 2026
+## Estado atual — 3 de outubro de 2026
 
 - O painel está funcional como piloto em Streamlit. Além do acesso local, foi
   publicado para validação no Streamlit Community Cloud em
@@ -52,16 +52,31 @@ sincronizadas periodicamente.
   administrativo entre tenants, restrito e auditável; hoje o RLS só autoriza
   acesso ao tenant vinculado à própria conta, então esse acesso administrativo
   ainda não existe.
-- Mercado Livre e Shopee estão no escopo para a futura integração. O usuário
-  informou que não possui conta própria no Mercado Livre e pediu para pausar
-  antes de iniciar o cadastro. Nenhuma conta de teste ou aplicação de
-  desenvolvedor foi criada; não há credenciais para validar OAuth/API. Ponto
-  de retomada: criar primeiro uma conta própria no Mercado Livre, depois
-  registrar a aplicação e preparar contas/testes; fazer o mesmo para Shopee.
-  “Tempo real” não está garantido: a frequência dependerá de
-  notificações/webhooks e dos limites de cada plataforma, além de um mecanismo
-  de sincronização ativo. O Community Cloud e os planos gratuitos não oferecem
-  garantias de produção.
+- O login da conta própria no Mercado Livre e o vínculo com o portal de
+  desenvolvedores foram concluídos. A aplicação `Marketplace Intelligence DEV`
+  foi criada como não certificada, para uso de negócios e faixa prevista de
+  1 a 10 usuários. Foi configurado um logotipo provisório, OAuth Authorization
+  Code com Refresh Token e PKCE, sem Client Credentials, e a URI de retorno
+  inicial `https://marketplace-intelligence-dev.streamlit.app/`. As permissões
+  de vendas/envios, publicações, publicidade e métricas foram limitadas a
+  leitura; o portal mantém a permissão de usuários como leitura e escrita.
+  Nenhum tópico ou callback de notificações foi configurado no portal.
+- O fluxo de conexão OAuth DEV foi implementado em `integracao_mercadolivre.py`:
+  Authorization Code, state aleatório de uso único, PKCE S256, troca e
+  renovação de tokens e armazenamento criptografado no Supabase por tenant.
+  A migração `20261003170000_mercadolivre_oauth.sql` foi aplicada no SQL
+  Editor do projeto `marketplace-intelligence-dev` em 3 de outubro de 2026; o
+  Supabase confirmou sucesso. Ela cria as tabelas com RLS e um lock de
+  renovação para evitar reutilização concorrente do refresh token. Ainda faltam
+  preencher os secrets locais/hospedados com Client ID, Client Secret e uma
+  chave Fernet persistente. A aplicação ainda não foi autorizada por uma conta
+  de loja nem usada para validar a API; client secret e tokens não devem ser
+  incluídos no repositório. Depois de configurar os secrets, validar o OAuth
+  e os recursos de leitura antes de implementar ingestão ou notificações.
+  A integração Shopee ainda não começou. “Tempo real” não está garantido: a
+  frequência dependerá dos recursos e limites de cada plataforma e de um
+  mecanismo de sincronização ativo. O Community Cloud e os planos gratuitos
+  não oferecem garantias de produção.
 - O URL padrão de recuperação do Supabase DEV era `http://localhost:3000`.
   Foi criado e iniciado `recuperar_senha_dev.py`, um callback local limitado
   ao loopback. O primeiro fluxo de recuperação foi concluído, mas a senha
@@ -76,8 +91,10 @@ sincronizadas periodicamente.
 - O Supabase está configurado para autenticação, vínculo usuário/tenant,
   persistência dos dados e histórico de importações. O modo local com CSV foi
   mantido.
-- A importação disponível é manual, por arquivos CSV. As APIs dos marketplaces,
-  OAuth e sincronização automática ainda não foram implementados.
+- A importação de dados de negócio ainda é manual, por arquivos CSV. O fluxo
+  OAuth de conexão do Mercado Livre foi implementado, mas depende da aplicação
+  da migração DEV e da configuração de secrets; ainda não há ingestão de dados
+  pela API nem sincronização automática.
 - As cargas de teste do Mercado Livre registram 30 pedidos, 8 produtos,
   8 itens de estoque e 15 registros de publicidade, sem erros de importação.
 - A auditoria realizada não encontrou SKUs sem correspondência nem valores
@@ -98,6 +115,7 @@ marketplace_demo/
 ├── dashboard.py
 ├── autenticacao.py
 ├── armazenamento.py
+├── integracao_mercadolivre.py
 ├── filtros.py
 ├── componentes.py
 ├── dados_periodo.py
@@ -119,6 +137,9 @@ marketplace_demo/
 - `armazenamento.py` centraliza a leitura e gravação dos dados. No modo local
   lê arquivos CSV; em produção acessa tabelas Supabase com isolamento por
   tenant, cache e histórico de importações.
+- `integracao_mercadolivre.py` gerencia o início e callback OAuth, o
+  armazenamento criptografado das credenciais DEV e a renovação serializada
+  dos tokens do Mercado Livre.
 - `filtros.py` renderiza e mantém o período, produto e marketplace escolhidos
   globalmente.
 - `dados_periodo.py` calcula KPIs financeiros, desempenho de produtos,
@@ -135,8 +156,8 @@ marketplace_demo/
   gráficos diários e resumo da operação.
 - `paginas/vendas_pedidos.py`: consulta, filtros, detalhes e exportação dos
   pedidos.
-- `paginas/marketplaces.py` e `secoes/marketplace.py`: indicadores e gráficos
-  comparativos por canal.
+- `paginas/marketplaces.py` e `secoes/marketplace.py`: conexão OAuth DEV do
+  Mercado Livre, indicadores e gráficos comparativos por canal.
 - `paginas/produtos_estoque.py`, `secoes/produtos.py` e `secoes/estoque.py`:
   portfólio, desempenho de produtos, saldos e alertas de estoque.
 - `paginas/inteligencia.py`: oportunidades e alertas derivados dos indicadores.
@@ -154,7 +175,11 @@ marketplace_demo/
   membros, tabelas de negócio, histórico, índices e políticas RLS.
 - `supabase/migrations/20261002153000_pilot_owner.sql`: associa a conta inicial
   ao tenant de piloto.
-- `.streamlit/secrets.toml.example`: modelo de configuração local. O arquivo
+- `supabase/migrations/20261003170000_mercadolivre_oauth.sql`: cria o
+  armazenamento isolado por tenant para conexões e transações OAuth, com RLS
+  e lock de renovação de refresh tokens.
+- `.streamlit/secrets.toml.example`: modelo de configuração local, incluindo
+  os nomes dos secrets necessários para o Mercado Livre DEV. O arquivo
   `.streamlit/secrets.toml` contém segredos locais e não deve ser compartilhado
   ou versionado.
 - `.gitignore`: exclui secrets, arquivos `.env`, caches Python e fontes/histórico
@@ -176,13 +201,14 @@ tendência correta ao filtrar por produto.
 
 ## Próximas etapas recomendadas
 
-1. **Retomar pelo cadastro de conta própria** no Mercado Livre (ainda não
-   iniciada), depois registrar uma aplicação e criar/obter recursos de teste.
-   Em seguida, cadastrar-se na Shopee Open Platform e registrar sua aplicação.
-   Não conectar ainda a loja do amigo.
-2. **Implementar e validar Mercado Livre em DEV**: OAuth, armazenamento e
-   renovação segura de tokens, ingestão idempotente e notificações/webhooks ou
-   sincronização periódica, conforme permitido pela API.
+1. **Configurar e validar OAuth do Mercado Livre em DEV**: aplicar a migração
+   OAuth somente no projeto Supabase DEV, configurar os secrets locais e
+   hospedados, autorizar a própria conta e validar a conexão. Depois, integrar
+   leitura idempotente de pedidos, produtos e publicidade. Não conectar ainda
+   a loja do amigo.
+2. **Preparar notificações do Mercado Livre** somente depois de implementar e
+   publicar o callback correspondente; caso contrário, validar primeiro a
+   sincronização periódica e seus limites.
 3. **Implementar e validar Shopee em DEV** com os mesmos requisitos de
    isolamento, renovação de credenciais, ingestão idempotente e atualização
    automática suportada pela plataforma.

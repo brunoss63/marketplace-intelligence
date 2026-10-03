@@ -1,5 +1,6 @@
 
 from componentes import animar_pagina, cabecalho_pagina
+from integracao_mercadolivre import mostrar_conexao_mercadolivre
 from secoes.marketplace import mostrar_marketplace
 
 
@@ -20,5 +21,6 @@ cabecalho_pagina(
     "▥"
 )
 
+mostrar_conexao_mercadolivre()
 
 mostrar_marketplace()

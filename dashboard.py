@@ -7,6 +7,10 @@ from componentes import (
     marca_sidebar,
 )
 from filtros import renderizar_filtros_globais
+from integracao_mercadolivre import (
+    capturar_callback_oauth,
+    processar_callback_oauth,
+)
 
 
 st.set_page_config(
@@ -18,6 +22,8 @@ st.set_page_config(
 aplicar_estilo()
 marca_sidebar()
 exigir_autenticacao()
+capturar_callback_oauth()
+processar_callback_oauth()
 animar_elementos_rolagem()
 
 

@@ -16,8 +16,9 @@ criados e aplicados. A validação autenticada foi concluída com a importação
 0 ignorados e 0 erros. O dashboard confirmou a leitura dos pedidos e o
 histórico da importação. Os CSVs fictícios locais não foram enviados. Novas
 importações em produção gravam os registros e o histórico no banco, sem criar
-cópias CSV/JSON locais. A integração e a sincronização com APIs de marketplaces
-ainda não estão implementadas.
+cópias CSV/JSON locais. O fluxo OAuth de conexão do Mercado Livre já está
+implementado em código, mas ainda depende da migração e dos secrets DEV. A
+ingestão e a sincronização de dados pelas APIs ainda não estão implementadas.
 
 As leituras do banco ficam em cache por até 30 segundos, isoladas por tenant e
 usuário. Uma importação pelo painel invalida o cache imediatamente para que os
@@ -62,19 +63,63 @@ contornar esse isolamento. A futura implementação deve definir uma identidade
 administrativa explícita, registrar consultas e alterações administrativas e
 manter bloqueado o acesso cruzado para usuários clientes.
 
-Mercado Livre e Shopee estão no escopo. A preparação está pausada antes de
-qualquer cadastro, a pedido do responsável pelo produto, que informou não ter
-conta própria no Mercado Livre. O portal de desenvolvedores foi aberto e pediu
-autenticação; nenhum login, cadastro ou aplicação foi realizado. **Próximo
-passo ao retomar:** criar uma conta própria no Mercado Livre, entrar no portal
-de desenvolvedores e registrar uma aplicação; depois preparar recursos de
-teste e repetir o processo na Shopee Open Platform. Não conectar a loja do
-amigo antes de obter sua autorização.
+Mercado Livre e Shopee estão no escopo. A conta própria do Mercado Livre foi
+vinculada ao portal de desenvolvedores e a aplicação `Marketplace Intelligence
+DEV` foi criada como não certificada. Ela usa OAuth Authorization Code com
+Refresh Token e PKCE, sem Client Credentials, e a URI inicial de retorno
+`https://marketplace-intelligence-dev.streamlit.app/`. As permissões de
+vendas/envios, publicações, publicidade e métricas foram configuradas somente
+para leitura; a permissão de usuários aparece como leitura e escrita fixa no
+portal. Nenhum tópico ou callback de notificações foi configurado. O logotipo
+usado é provisório.
 
-Ainda não há aplicações, credenciais nem conexão real. Webhooks/notificações,
-sincronização periódica e frequência alcançável devem ser determinados e
-validados separadamente para cada API; não prometa atualização em tempo real
-sem evidência.
+A implementação do fluxo OAuth DEV está em `integracao_mercadolivre.py`:
+state de uso único, PKCE S256, tokens criptografados no Supabase por tenant e
+renovação serializada do refresh token. A migração
+`supabase/migrations/20261003170000_mercadolivre_oauth.sql` ainda precisa ser
+aplicada somente no Supabase DEV. Também é necessário configurar, nos secrets
+locais e hospedados do DEV, `MERCADOLIVRE_DEV_CLIENT_ID`,
+`MERCADOLIVRE_DEV_CLIENT_SECRET`, `MERCADOLIVRE_DEV_REDIRECT_URI` e uma chave
+Fernet persistente em `MERCADOLIVRE_DEV_TOKEN_ENCRYPTION_KEY`. O endereço de
+retorno precisa coincidir exatamente com o cadastrado no portal.
+
+A migração `20261003170000_mercadolivre_oauth.sql` foi aplicada em 3 de
+outubro de 2026 pelo SQL Editor do projeto
+`marketplace-intelligence-dev`; o Supabase confirmou sucesso. Ela não foi
+executada no projeto de produção.
+
+Falta configurar os secrets. Antes de reiniciar o app local:
+
+1. Gere localmente uma chave Fernet usando Python:
+
+   ```powershell
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+
+   Copie a chave diretamente para os secrets locais e para os secrets do app
+   Streamlit DEV. Ela precisa ser idêntica nos dois ambientes e permanecer
+   estável enquanto houver tokens criptografados no banco. Não a envie por
+   chat, não a versione e não a gere novamente depois de conectar uma conta.
+2. Acrescente as quatro configurações `MERCADOLIVRE_DEV_*` ao
+   `.streamlit/secrets.toml` local e ao painel **Settings > Secrets** do app
+   hospedado. Use o Client ID e Client Secret da aplicação criada no portal e
+   como redirect exatamente `https://marketplace-intelligence-dev.streamlit.app/`.
+   Preserve todas as configurações existentes e não inclua esses valores no
+   `.streamlit/secrets.toml.example`.
+3. Reinicie o app local e, na página **Marketplaces**, inicie a conexão.
+   Autorize somente a sua conta própria e use **Validar conexão**. O código
+   remove o `code` e o `state` da URL depois de autenticar no Supabase e validar
+   o estado da transação. Não envie tokens ou screenshots que mostrem
+   credenciais.
+
+A aplicação ainda não foi autorizada por uma conta de loja nem testada contra
+a API. Não inclua client secret nem tokens no repositório ou em mensagens.
+Depois de aplicar a migração e configurar os secrets, autorize somente a conta
+própria e valide operações de leitura no DEV. Configure notificações somente
+depois de publicar um endpoint de callback próprio; até lá, avalie
+sincronização periódica e limites da API. Depois, fazer o cadastro da
+aplicação Shopee Open Platform. Não conectar a loja do amigo antes de obter
+sua autorização.
 
 O Streamlit Community Cloud e o Supabase DEV são ambientes gratuitos de piloto,
 sem garantias de produção. Só usar dados reais após revisar o conteúdo e
