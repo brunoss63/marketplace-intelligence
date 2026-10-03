@@ -14,7 +14,7 @@ import requests
 import streamlit as st
 from postgrest.exceptions import APIError
 
-from autenticacao import obter_configuracao
+from autenticacao import obter_configuracao, obter_origem_configuracao
 from armazenamento import (
     is_database_mode,
     obter_cliente_supabase,
@@ -28,6 +28,7 @@ _URL_AUTORIZACAO = "https://auth.mercadolivre.com.br/authorization"
 _URL_TOKEN = "https://api.mercadolibre.com/oauth/token"
 _URL_USUARIO = "https://api.mercadolibre.com/users/me"
 _NOME_MARKETPLACE = "Mercado Livre"
+_CLIENT_ID_APLICACAO_DEV = "6066488581881437"
 _ANTECEDENCIA_REFRESH = timedelta(minutes=2)
 _TIMEOUT_REQUISICAO = (5, 15)
 
@@ -321,6 +322,23 @@ def _mensagem_erro_oauth(status_code: int, corpo: Any) -> str:
     return mensagem + orientacoes.get(codigo, "")
 
 
+def _diagnostico_invalid_client() -> str:
+    client_id = obter_configuracao("MERCADOLIVRE_DEV_CLIENT_ID")
+    id_corresponde = client_id == _CLIENT_ID_APLICACAO_DEV
+    origem_client_id = obter_origem_configuracao(
+        "MERCADOLIVRE_DEV_CLIENT_ID"
+    )
+    origem_client_secret = obter_origem_configuracao(
+        "MERCADOLIVRE_DEV_CLIENT_SECRET"
+    )
+    return (
+        " Diagnóstico seguro: Client ID lido de "
+        f"{origem_client_id} (corresponde ao app DEV: "
+        f"{'sim' if id_corresponde else 'não'}); Client Secret lido de "
+        f"{origem_client_secret}. Nenhum valor secreto foi exibido."
+    )
+
+
 def _solicitar_token(dados: dict[str, str]) -> dict[str, str | int]:
     try:
         resposta = requests.post(
@@ -348,8 +366,14 @@ def _solicitar_token(dados: dict[str, str]) -> dict[str, str | int]:
             "O serviço OAuth do Mercado Livre retornou uma resposta inválida."
         ) from erro
     if not resposta.ok:
+        codigo_erro = corpo.get("error") if isinstance(corpo, dict) else None
+        diagnostico = (
+            _diagnostico_invalid_client()
+            if codigo_erro == "invalid_client"
+            else ""
+        )
         raise RuntimeError(
-            _mensagem_erro_oauth(resposta.status_code, corpo)
+            _mensagem_erro_oauth(resposta.status_code, corpo) + diagnostico
         )
     return _token_da_resposta(corpo)
 

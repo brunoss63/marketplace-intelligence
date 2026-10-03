@@ -17,23 +17,35 @@ _CHAVES_SESSAO = (
 )
 
 
-def _configuracao(nome: str) -> str | None:
+def _configuracao_com_origem(nome: str) -> tuple[str | None, str]:
     valor_ambiente = os.environ.get(nome)
     if valor_ambiente:
-        return valor_ambiente
+        return valor_ambiente, "variável de ambiente"
 
     try:
         valor_segredo = st.secrets.get(nome)
     except StreamlitSecretNotFoundError:
-        return None
+        return None, "ausente"
 
-    return str(valor_segredo) if valor_segredo else None
+    if valor_segredo:
+        return str(valor_segredo), "Streamlit Secrets"
+    return None, "ausente"
+
+
+def _configuracao(nome: str) -> str | None:
+    return _configuracao_com_origem(nome)[0]
 
 
 def obter_configuracao(nome: str) -> str | None:
     """Lê uma configuração primeiro do ambiente e depois dos secrets."""
 
     return _configuracao(nome)
+
+
+def obter_origem_configuracao(nome: str) -> str:
+    """Informa a origem selecionada para uma configuração, sem seu valor."""
+
+    return _configuracao_com_origem(nome)[1]
 
 
 def _credenciais_supabase(ambiente: str) -> tuple[str | None, str | None]:

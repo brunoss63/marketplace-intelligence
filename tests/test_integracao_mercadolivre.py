@@ -173,6 +173,37 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
 
         self.assertNotIn("sensitive-provider-details", str(contexto.exception))
 
+    @patch("integracao_mercadolivre.obter_origem_configuracao")
+    @patch("integracao_mercadolivre.obter_configuracao")
+    @patch("integracao_mercadolivre.requests.post")
+    def test_invalid_client_exibe_diagnostico_sem_expor_secret(
+        self,
+        post: Mock,
+        obter_configuracao: Mock,
+        obter_origem: Mock,
+    ) -> None:
+        obter_configuracao.return_value = "6066488581881437"
+        obter_origem.side_effect = [
+            "Streamlit Secrets",
+            "variável de ambiente",
+        ]
+        resposta = Mock()
+        resposta.ok = False
+        resposta.status_code = 400
+        resposta.json.return_value = {"error": "invalid_client"}
+        post.return_value = resposta
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Client ID lido de Streamlit Secrets",
+        ) as contexto:
+            integracao._solicitar_token({"grant_type": "authorization_code"})
+
+        mensagem = str(contexto.exception)
+        self.assertIn("corresponde ao app DEV: sim", mensagem)
+        self.assertIn("Client Secret lido de variável de ambiente", mensagem)
+        self.assertNotIn("6066488581881437", mensagem)
+
 
 if __name__ == "__main__":
     unittest.main()
