@@ -107,6 +107,36 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
         self.assertNotEqual(token_cifrado, "token-de-teste")
         self.assertEqual(token, "token-de-teste")
 
+    @patch("integracao_mercadolivre.is_database_mode", return_value=False)
+    def test_status_integracao_mercadolivre_indica_ambiente_dev(
+        self,
+        _: Mock,
+    ) -> None:
+        self.assertIn("DEV", integracao.status_integracao_mercadolivre())
+
+    def test_status_integracao_mercadolivre_informa_conexao(self) -> None:
+        with patch("integracao_mercadolivre.is_database_mode", return_value=True):
+            with patch("integracao_mercadolivre._obter_configuracao_ml") as obter_configuracao:
+                with patch("integracao_mercadolivre._obter_conexao") as obter_conexao:
+                    obter_configuracao.return_value = {
+                        "client_id": "app-id",
+                        "client_secret": "app-secret",
+                        "redirect_uri": "https://example.com/callback",
+                        "token_encryption_key": Fernet.generate_key().decode("ascii"),
+                    }
+                    obter_conexao.return_value = {
+                        "external_user_id": "123456",
+                        "expires_at": (
+                            integracao._agora_utc() + integracao.timedelta(days=1)
+                        ).isoformat(),
+                    }
+
+                    status = integracao.status_integracao_mercadolivre()
+
+                    self.assertIn("Conectada", status)
+                    self.assertIn("123456", status)
+                    self.assertIn("válido até", status)
+
     def test_resposta_oauth_exige_access_e_refresh_token(self) -> None:
         resposta = {
             "access_token": "access-test",

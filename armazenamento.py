@@ -220,6 +220,8 @@ def ler_dataset(
 def salvar_importacao(
     tipo_dado: str,
     registros: pd.DataFrame,
+    *,
+    preservar_campos: set[str] | None = None,
 ) -> dict[str, int]:
     tipos_arquivo = {
         "Pedidos": "pedidos.csv",
@@ -236,6 +238,14 @@ def salvar_importacao(
 
     campos = definicao["columns"]
     chaves = definicao["keys"]
+    campos_preservados = preservar_campos or set()
+    campos_invalidos = campos_preservados - campos.keys()
+    if campos_invalidos:
+        raise ValueError(
+            "Não é possível preservar campos fora do esquema: "
+            + ", ".join(sorted(campos_invalidos))
+            + "."
+        )
     colunas_chave_banco = [campos[chave] for chave in chaves]
     linhas_existentes = _ler_tabela(
         str(definicao["table"]),
@@ -274,6 +284,7 @@ def salvar_importacao(
             **{
                 coluna_banco: linha.get(coluna_csv)
                 for coluna_csv, coluna_banco in campos.items()
+                if coluna_csv not in campos_preservados
             },
         }
         for linha in registros_json

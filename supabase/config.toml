@@ -1,0 +1,5 @@
+[functions.mercadolivre-orders-webhook]
+verify_jwt = false
+
+[functions.mercadolivre-orders-worker]
+verify_jwt = false

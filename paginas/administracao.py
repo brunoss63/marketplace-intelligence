@@ -1,0 +1,3 @@
+from administracao import mostrar_painel_administracao
+
+mostrar_painel_administracao()

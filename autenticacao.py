@@ -14,6 +14,7 @@ _CHAVES_SESSAO = (
     "_mi_supabase_user_id",
     "_mi_supabase_client",
     "_mi_tenant_id",
+    "_mi_tenant_role",
 )
 
 
@@ -25,16 +26,23 @@ def _valor_segredo_streamlit(nome: str) -> str | None:
     return str(valor_segredo) if valor_segredo else None
 
 
+def _normalizar_valor_configuracao(valor: object) -> str | None:
+    if valor is None:
+        return None
+    valor_normalizado = str(valor).strip()
+    return valor_normalizado or None
+
+
 def _configuracao_com_origem(
     nome: str,
     *,
     preferir_secrets: bool = False,
 ) -> tuple[str | None, str]:
-    valor_ambiente = os.environ.get(nome)
+    valor_ambiente = _normalizar_valor_configuracao(os.environ.get(nome))
     if valor_ambiente and not preferir_secrets:
         return valor_ambiente, "variável de ambiente"
 
-    valor_segredo = _valor_segredo_streamlit(nome)
+    valor_segredo = _normalizar_valor_configuracao(_valor_segredo_streamlit(nome))
     if valor_segredo:
         return valor_segredo, "Streamlit Secrets"
     if valor_ambiente:
@@ -184,6 +192,75 @@ def _renderizar_login(cliente: Client) -> None:
     st.rerun()
 
 
+def obter_role_tenant_atual() -> str:
+    """Retorna o papel do usuário no tenant atual (owner/member)."""
+    papel = st.session_state.get("_mi_tenant_role")
+    if not papel:
+        raise RuntimeError(
+            "O papel do usuário no tenant não foi carregado. "
+            "Entre novamente para revalidar o acesso."
+        )
+    return str(papel)
+
+
+def eh_owner_tenant() -> bool:
+    """Indica se o usuário atual tem papel administrativo do tenant."""
+    return obter_role_tenant_atual() == "owner"
+
+
+def exigir_permissao_administrativa() -> None:
+    """Bloqueia acesso administrativo até existir um papel explícito de owner."""
+    if not eh_owner_tenant():
+        raise RuntimeError(
+            "Acesso administrativo entre tenants ainda não está habilitado "
+            "para esta conta. Hoje, o tenant atual só permite acesso "
+            "restrito ao próprio usuário e ao papel vinculado."
+        )
+
+
+def _carregar_vinculo_tenant(cliente: Client) -> tuple[str, str]:
+    """Lê o tenant e o papel do usuário autenticado, sem usar service_role."""
+    try:
+        memberships = (
+            cliente.table("tenant_members")
+            .select("tenant_id, role")
+            .execute()
+            .data
+            or []
+        )
+    except APIError as erro:
+        raise RuntimeError(
+            "Não foi possível validar o vínculo desta conta com o tenant: "
+            f"{erro.message}"
+        ) from erro
+
+    if not memberships:
+        raise RuntimeError(
+            "Esta conta ainda não está vinculada a um tenant do piloto. "
+            "Use o fluxo de onboarding para solicitar acesso."
+        )
+    if len(memberships) != 1:
+        raise RuntimeError(
+            "Esta conta precisa estar vinculada a exatamente um tenant "
+            "para acessar os dados do piloto."
+        )
+
+    membro = memberships[0]
+    tenant_id = str(membro.get("tenant_id") or "")
+    papel = str(membro.get("role") or "member")
+    if papel not in {"owner", "member"}:
+        raise RuntimeError(
+            "O vínculo do usuário com o tenant está em um papel inválido. "
+            "A conta precisa ser revalidada no cadastro do piloto."
+        )
+    if not tenant_id:
+        raise RuntimeError(
+            "O vínculo do usuário com o tenant não retornou um identificador "
+            "válido."
+        )
+    return tenant_id, papel
+
+
 def exigir_autenticacao() -> None:
     """Bloqueia o painel até existir uma sessão Supabase autorizada."""
 
@@ -250,39 +327,26 @@ def exigir_autenticacao() -> None:
                 st.session_state["_mi_supabase_user_id"] = usuario.id
                 st.session_state["_mi_supabase_client"] = cliente
                 try:
-                    memberships = (
-                        cliente.table("tenant_members")
-                        .select("tenant_id")
-                        .execute()
-                        .data
-                        or []
-                    )
-                except APIError as erro:
-                    st.error(
-                        "Não foi possível validar o vínculo desta conta "
-                        f"com o tenant: {erro.message}"
-                    )
-                    st.stop()
-                if len(memberships) != 1:
-                    st.error(
-                        "Esta conta precisa estar vinculada a exatamente "
-                        "um tenant para acessar os dados do piloto."
-                    )
+                    tenant_id, tenant_role = _carregar_vinculo_tenant(cliente)
+                except RuntimeError as erro:
+                    st.error(str(erro))
+                    from administracao import mostrar_fluxo_onboarding_piloto
+                    mostrar_fluxo_onboarding_piloto()
                     if st.button("Sair", key="mi_logout_unlinked"):
                         cliente.auth.sign_out()
                         _limpar_sessao()
                         st.rerun()
                     st.stop()
-                st.session_state["_mi_tenant_id"] = memberships[0][
-                    "tenant_id"
-                ]
+                st.session_state["_mi_tenant_id"] = tenant_id
+                st.session_state["_mi_tenant_role"] = tenant_role
                 if st.sidebar.button("Sair", key="mi_logout"):
                     cliente.auth.sign_out()
                     _limpar_sessao()
                     st.rerun()
                 st.sidebar.caption(
                     f"Acesso autenticado: "
-                    f"{st.session_state['_mi_supabase_email']}"
+                    f"{st.session_state['_mi_supabase_email']} "
+                    f"({tenant_role})"
                 )
                 return
             _limpar_sessao()

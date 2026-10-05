@@ -455,7 +455,8 @@ def _status_canonico(valor: object) -> str:
         "pending", "unpaid", "processing", "shipped", "to ship",
         "to receive", "ready to ship", "awaiting shipment",
         "awaiting payment", "in transit", "created", "incomplete",
-        "em andamento", "aberto", "aberta", "nao pago",
+        "confirmed", "payment required", "payment in process",
+        "partially paid", "em andamento", "aberto", "aberta", "nao pago",
     }:
         return "Em andamento"
     return ""

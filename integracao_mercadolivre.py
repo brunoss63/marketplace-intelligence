@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from base64 import urlsafe_b64encode
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from secrets import token_urlsafe
 from time import sleep
@@ -19,6 +19,10 @@ from armazenamento import (
     is_database_mode,
     obter_cliente_supabase,
     obter_tenant_id,
+)
+from sincronizacao_mercadolivre import (
+    sincronizar_pedidos,
+    sincronizar_produtos_e_estoque,
 )
 
 
@@ -233,9 +237,19 @@ def _consumir_transacao_oauth(state: str) -> dict[str, Any]:
         )
 
     transacao = linhas[0]
-    expira_em = datetime.fromisoformat(
-        str(transacao["expires_at"]).replace("Z", "+00:00")
-    )
+    expires_at = transacao.get("expires_at")
+    if not isinstance(expires_at, str) or not expires_at.strip():
+        raise RuntimeError(
+            "A autorização do Mercado Livre não está vinculada a uma data "
+            "de expiração válida. Inicie a conexão novamente."
+        )
+    try:
+        expira_em = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError as erro:
+        raise RuntimeError(
+            "A autorização do Mercado Livre retornou uma expiração inválida. "
+            "Inicie a conexão novamente."
+        ) from erro
     if expira_em <= _agora_utc():
         raise RuntimeError(
             "A autorização expirou. Inicie a conexão com o Mercado Livre "
@@ -519,9 +533,19 @@ def _obter_conexao(
 
 
 def _expira_em(conexao: dict[str, Any]) -> datetime:
-    return datetime.fromisoformat(
-        str(conexao["expires_at"]).replace("Z", "+00:00")
-    )
+    valor = conexao.get("expires_at")
+    if not isinstance(valor, str) or not valor.strip():
+        raise RuntimeError(
+            "A conexão do Mercado Livre não está persistindo uma expiração "
+            "válida. Reauthentique a conta antes de continuar."
+        )
+    try:
+        return datetime.fromisoformat(valor.replace("Z", "+00:00"))
+    except ValueError as erro:
+        raise RuntimeError(
+            "A conexão do Mercado Livre retornou uma expiração inválida. "
+            "Reautorização necessária."
+        ) from erro
 
 
 def _reivindicar_lock_refresh(lease_id: str) -> bool:
@@ -699,11 +723,54 @@ def _remover_conexao() -> None:
     st.session_state.pop(_CHAVE_URL_AUTORIZACAO, None)
 
 
+def status_integracao_mercadolivre() -> str:
+    """Resumo legível do estado atual da conexão do Mercado Livre."""
+    if not is_database_mode():
+        return "Disponível somente em ambiente Supabase DEV."
+
+    try:
+        _obter_configuracao_ml()
+    except RuntimeError as erro:
+        return f"Configuração pendente: {erro}"
+
+    try:
+        conexao = _obter_conexao()
+    except (APIError, RuntimeError) as erro:
+        mensagem = erro.message if isinstance(erro, APIError) else str(erro)
+        return f"Conexão indisponível: {mensagem}"
+
+    if conexao is None:
+        return "Desconectada: pronta para iniciar a autorização OAuth."
+
+    expiracao = _expira_em(conexao)
+    agora = _agora_utc()
+    if expiracao <= agora:
+        return (
+            "Conectada à conta Mercado Livre "
+            f"{conexao.get('external_user_id', 'desconhecida')}, "
+            "mas o token já expirou e precisa de renovação."
+        )
+    if expiracao <= agora + _ANTECEDENCIA_REFRESH:
+        return (
+            "Conectada à conta Mercado Livre "
+            f"{conexao.get('external_user_id', 'desconhecida')}; o token "
+            f"expira em {expiracao.astimezone().strftime('%d/%m/%Y %H:%M %Z')} "
+            "e será renovado antes da próxima chamada."
+        )
+
+    return (
+        "Conectada à conta Mercado Livre "
+        f"{conexao.get('external_user_id', 'desconhecida')} e o token fica "
+        f"válido até {expiracao.astimezone().strftime('%d/%m/%Y %H:%M %Z')}."
+    )
+
+
 def mostrar_conexao_mercadolivre() -> None:
     if not is_database_mode():
         return
 
     st.subheader("Conexão com o Mercado Livre")
+    st.caption(status_integracao_mercadolivre())
     try:
         _obter_configuracao_ml()
         conexao = _obter_conexao()
@@ -749,6 +816,99 @@ def mostrar_conexao_mercadolivre() -> None:
         f"{expiracao.astimezone().strftime('%d/%m/%Y %H:%M %Z')}. "
         "A renovação será feita antes de uma chamada à API."
     )
+
+    with st.expander("Sincronizar dados do Mercado Livre"):
+        st.caption(
+            "A sincronização é manual. Pedidos usam o período escolhido; "
+            "produtos e estoque leem as publicações ativas. Custos de produto, "
+            "taxas e frete não são fornecidos por estas leituras e continuam "
+            "dependendo da importação manual. Registros antigos ou de "
+            "publicações inativas não são removidos automaticamente."
+        )
+        hoje = date.today()
+        coluna_inicio, coluna_fim = st.columns(2)
+        with coluna_inicio:
+            data_inicio_sync = st.date_input(
+                "Pedidos desde",
+                value=hoje - timedelta(days=30),
+                key="mi_ml_sync_start",
+                format="DD/MM/YYYY",
+            )
+        with coluna_fim:
+            data_fim_sync = st.date_input(
+                "Pedidos até",
+                value=hoje,
+                key="mi_ml_sync_end",
+                format="DD/MM/YYYY",
+            )
+
+        coluna_pedidos, coluna_produtos = st.columns(2)
+        with coluna_pedidos:
+            if st.button(
+                "Sincronizar pedidos",
+                key="mi_ml_sync_orders",
+            ):
+                if data_inicio_sync > data_fim_sync:
+                    st.error(
+                        "A data inicial não pode ser posterior à data final."
+                    )
+                else:
+                    try:
+                        with st.spinner("Lendo pedidos do Mercado Livre..."):
+                            resultado = sincronizar_pedidos(
+                                obter_access_token_mercadolivre(),
+                                str(conexao["external_user_id"]),
+                                data_inicio_sync,
+                                data_fim_sync,
+                            )
+                    except (APIError, RuntimeError) as erro:
+                        mensagem = (
+                            erro.message
+                            if isinstance(erro, APIError)
+                            else str(erro)
+                        )
+                        st.error(
+                            "Não foi possível sincronizar os pedidos: "
+                            f"{mensagem}"
+                        )
+                    else:
+                        st.success(
+                            f"Pedidos sincronizados: {resultado['total']} "
+                            f"linhas ({resultado['inseridos']} novas, "
+                            f"{resultado['atualizados']} atualizadas)."
+                        )
+        with coluna_produtos:
+            if st.button(
+                "Sincronizar produtos e estoque",
+                key="mi_ml_sync_products",
+            ):
+                try:
+                    with st.spinner(
+                        "Lendo produtos e estoque do Mercado Livre..."
+                    ):
+                        resultado = sincronizar_produtos_e_estoque(
+                            obter_access_token_mercadolivre(),
+                            str(conexao["external_user_id"]),
+                        )
+                except (APIError, RuntimeError) as erro:
+                    mensagem = (
+                        erro.message if isinstance(erro, APIError) else str(erro)
+                    )
+                    st.error(
+                        "Não foi possível sincronizar produtos e estoque: "
+                        f"{mensagem}"
+                    )
+                else:
+                    produtos = resultado["produtos"]
+                    estoque = resultado["estoque"]
+                    st.success(
+                        "Produtos e estoque sincronizados: "
+                        f"{produtos['total']} produtos "
+                        f"({produtos['inseridos']} novos, "
+                        f"{produtos['atualizados']} atualizados); "
+                        f"{estoque['total']} saldos."
+                    )
+
     coluna_validar, coluna_remover = st.columns(2)
     with coluna_validar:
         if st.button(

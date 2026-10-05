@@ -16,9 +16,10 @@ criados e aplicados. A validação autenticada foi concluída com a importação
 0 ignorados e 0 erros. O dashboard confirmou a leitura dos pedidos e o
 histórico da importação. Os CSVs fictícios locais não foram enviados. Novas
 importações em produção gravam os registros e o histórico no banco, sem criar
-cópias CSV/JSON locais. O fluxo OAuth de conexão do Mercado Livre já está
-implementado em código, mas ainda depende da migração e dos secrets DEV. A
-ingestão e a sincronização de dados pelas APIs ainda não estão implementadas.
+cópias CSV/JSON locais. O fluxo OAuth do Mercado Livre está conectado no DEV,
+e a sincronização manual de produtos e estoque já foi executada pela interface.
+A sincronização de pedidos está implementada, mas ainda precisa ser validada
+com pedidos reais. Não há sincronização agendada.
 
 As leituras do banco ficam em cache por até 30 segundos, isoladas por tenant e
 usuário. Uma importação pelo painel invalida o cache imediatamente para que os
@@ -48,25 +49,67 @@ GitHub, portanto commits enviados a essa branch podem atualizar a implantação.
 Os logins hospedados das contas A e B foram confirmados. Não use esse deploy de
 Community Cloud como ambiente de produção comercial.
 
-## Preparação antes de convidar o primeiro cliente
+## Objetivo: conquistar e atender o primeiro cliente
 
-O usuário do amigo e seu tenant **não devem ser criados ainda**. A apresentação
-e o convite ficam para depois que as integrações de Mercado Livre e Shopee
-estiverem implementadas e testadas em DEV, e que o acesso administrativo entre
-tenants tenha sido criado com auditoria.
+O primeiro passo comercial é um piloto pequeno, autorizado e acompanhado de
+perto com um cliente, para validar uma necessidade real e recolher feedback.
+Não é preciso concluir Shopee, automação total ou preparação para escala antes
+de iniciar essa conversa. Escolha com o cliente o marketplace e o problema que
+serão o foco; só apresente como disponível o que já foi testado. O amigo pode
+ser esse primeiro cliente se continuar sendo o candidato, mas isso não é um
+pré-requisito.
 
-O responsável pelo produto solicitou acesso administrativo aos tenants. Hoje
-as policies RLS só permitem a cada conta consultar o tenant ao qual está
-vinculada; não há acesso global de administrador nem auditoria desse acesso.
-Não use chaves `service_role` no navegador ou na aplicação Streamlit para
-contornar esse isolamento. A futura implementação deve definir uma identidade
-administrativa explícita, registrar consultas e alterações administrativas e
-manter bloqueado o acesso cruzado para usuários clientes.
+Antes de acessar dados reais, confirme a autorização do cliente, explique o
+escopo e as limitações, crie um tenant exclusivo e acompanhe o onboarding. Se
+uma capacidade importante ainda não estiver validada, mantenha-a manual ou
+fora do escopo do piloto, em vez de prometer automação ou “tempo real”. Ao
+final, recolha feedback e decida com base nele se vale ampliar a integração ou
+atender outro cliente.
 
-Mercado Livre e Shopee estão no escopo. A conta própria do Mercado Livre foi
-vinculada ao portal de desenvolvedores e a aplicação `Marketplace Intelligence
-DEV` foi criada como não certificada. Ela usa OAuth Authorization Code com
-Refresh Token e PKCE, sem Client Credentials, e a URI inicial de retorno
+O acesso operacional continua restrito ao tenant ao qual cada conta está
+vinculada: owners administram o próprio tenant, mas não podem consultar dados
+de outros tenants. O painel registra ações administrativas no tenant, e a
+identidade global autorizada para aprovar onboarding não concede acesso
+cruzado aos dados operacionais. O primeiro piloto não exige esse acesso
+cruzado: o cliente deve operar seu próprio tenant. Qualquer futura função de
+administração entre tenants precisa de autorização explícita e auditoria
+própria. Não use chaves `service_role` no navegador ou na aplicação Streamlit
+para contornar o isolamento RLS.
+
+### Fluxo de onboarding do piloto
+
+O processo de onboarding do piloto privado segue a seguinte sequência:
+
+1. O usuário autenticado, mas sem vínculo com tenant, entra na tela de acesso e
+   escolhe o fluxo de solicitação de onboarding.
+2. O app grava um evento de `pilot_onboarding_request` em
+   `tenant_access_audit` sem tenant associado, evitando a criação de acesso
+   irrestrito antes da aprovação.
+3. O administrador global do piloto acessa o painel e visualiza as solicitações
+   pendentes. A autorização fica explícita em `pilot_administrators`; ser owner
+   de um tenant, por si só, não concede visibilidade ou aprovação global.
+4. O administrador informa o nome do tenant e o papel do usuário (`member` ou
+   `owner`) e aprova a solicitação.
+5. O sistema cria o tenant, registra o vínculo em `tenant_members` e mantém a
+   auditoria da aprovação para rastreabilidade.
+6. Com o tenant vinculado, a sessão do usuário passa a ter acesso ao ambiente
+   isolado e aos dados do piloto de forma restrita ao tenant aprovado.
+
+O fluxo depende também da migração
+`supabase/migrations/20261005190000_pilot_onboarding_approval.sql`, que permite
+ao administrador explicitamente autorizado consultar pedidos pendentes e
+executa a aprovação em uma única transação no banco. A função valida o
+administrador, o owner do tenant de auditoria, a existência de um pedido
+pendente e a ausência de vínculo anterior antes de criar tenant, associação e
+evento de auditoria. A primeira conta administradora deve ser autorizada
+separadamente no Supabase pelo responsável do projeto.
+
+Mercado Livre e Shopee são possibilidades do produto, não pré-requisitos para
+o primeiro piloto: priorize o marketplace que o cliente escolhido realmente
+usa. A conta própria do Mercado Livre foi vinculada ao portal de desenvolvedores
+e a aplicação `Marketplace Intelligence DEV` foi criada como não certificada.
+Ela usa OAuth Authorization Code com Refresh Token e PKCE, sem Client
+Credentials, e a URI inicial de retorno
 `https://marketplace-intelligence-dev.streamlit.app/`. As permissões de
 vendas/envios, publicações, publicidade e métricas foram configuradas somente
 para leitura; a permissão de usuários aparece como leitura e escrita fixa no
@@ -75,10 +118,24 @@ usado é provisório.
 
 A implementação do fluxo OAuth DEV está em `integracao_mercadolivre.py`:
 state de uso único, PKCE S256, tokens criptografados no Supabase por tenant e
-renovação serializada do refresh token. A migração
+renovação serializada do refresh token. A conexão da conta própria foi
+concluída em 3 de outubro de 2026 e o app confirmou o armazenamento
+criptografado das credenciais no tenant DEV. Em 5 de outubro, a tela
+“Validar conexão” confirmou uma chamada autenticada à API e a identidade da
+conta. A sincronização manual de produtos e estoque das publicações ativas
+também foi executada na conta DEV e o usuário confirmou que o fluxo funcionou.
+Como a conta não tem produtos com estoque, ainda não foi possível comparar
+saldos retornados com quantidades positivas na loja; o teste confirma a
+execução do fluxo, não a precisão de saldos não nulos. A sincronização de
+pedidos está implementada, mas ainda não foi validada com pedidos reais porque
+essa conta não tem vendas. As operações são idempotentes e preservam custos,
+taxas e frete que tenham sido informados manualmente. Não há agendamento
+automático; produtos ou saldos antigos também não são removidos
+automaticamente. Publicidade continua pela importação manual até validar os
+recursos e métricas da API Product Ads. A migração
 `supabase/migrations/20261003170000_mercadolivre_oauth.sql` foi aplicada
-somente no Supabase DEV. Também é necessário configurar, nos secrets locais e
-hospedados do DEV, `MERCADOLIVRE_DEV_CLIENT_ID`,
+somente no Supabase DEV. Os secrets locais e hospedados do DEV incluem
+`MERCADOLIVRE_DEV_CLIENT_ID`,
 `MERCADOLIVRE_DEV_CLIENT_SECRET`, `MERCADOLIVRE_DEV_REDIRECT_URI` e uma chave
 Fernet persistente em `MERCADOLIVRE_DEV_TOKEN_ENCRYPTION_KEY`. O endereço de
 retorno precisa coincidir exatamente com o cadastrado no portal.
@@ -88,7 +145,8 @@ outubro de 2026 pelo SQL Editor do projeto
 `marketplace-intelligence-dev`; o Supabase confirmou sucesso. Ela não foi
 executada no projeto de produção.
 
-Falta configurar os secrets. Antes de reiniciar o app local:
+Os secrets DEV já estão configurados. Para uma configuração futura ou
+reconstrução do ambiente, siga estes passos sem compartilhar credenciais:
 
 1. Gere localmente uma chave Fernet usando Python:
 
@@ -108,20 +166,64 @@ Falta configurar os secrets. Antes de reiniciar o app local:
    sobre variáveis de ambiente de mesmo nome.
    Preserve todas as configurações existentes e não inclua esses valores no
    `.streamlit/secrets.toml.example`.
-3. Reinicie o app local e, na página **Marketplaces**, inicie a conexão.
-   Autorize somente a sua conta própria e use **Validar conexão**. O código
-   remove o `code` e o `state` da URL depois de autenticar no Supabase e validar
-   o estado da transação. Não envie tokens ou screenshots que mostrem
-   credenciais.
+3. Reinicie o app local e, na página **Marketplaces**, use **Validar conexão**
+   para confirmar uma chamada autenticada. Uma nova autorização só é necessária
+   se a conexão falhar ou for revogada. O código remove o `code` e o `state` da
+   URL depois de autenticar no Supabase e validar o estado da transação. Não
+   envie tokens ou screenshots que mostrem credenciais.
 
-A aplicação ainda não foi autorizada por uma conta de loja nem testada contra
-a API. Não inclua client secret nem tokens no repositório ou em mensagens.
-Depois de aplicar a migração e configurar os secrets, autorize somente a conta
-própria e valide operações de leitura no DEV. Configure notificações somente
-depois de publicar um endpoint de callback próprio; até lá, avalie
-sincronização periódica e limites da API. Depois, fazer o cadastro da
-aplicação Shopee Open Platform. Não conectar a loja do amigo antes de obter
-sua autorização.
+A chamada autenticada à API e a leitura de produtos/estoque foram executadas
+no DEV. A conta de teste não tem produtos com estoque positivo nem vendas;
+portanto, os saldos não nulos e os pedidos reais continuam sem validação live.
+Não inclua client secret nem tokens no repositório ou em mensagens. Configure
+notificações do Mercado Livre somente depois de publicar e validar um endpoint
+de callback próprio. O worker está agendado no DEV, mas a conta permanece sem
+notificações do Mercado Livre; até validar um evento autorizado, trate a
+atualização como manual.
+
+A Shopee ainda não tem aplicação registrada, credenciais elegíveis ou loja
+autorizada para testes live. O código atual prepara OAuth, persistência segura
+e sincronização, mas chamadas reais, sincronização pela interface e webhooks
+permanecem bloqueados até confirmar acesso e contratos oficiais da Open
+Platform. Não conectar a loja de terceiros antes de obter sua autorização.
+
+### Atualizações automáticas de pedidos no Mercado Livre
+
+As duas Edge Functions estão publicadas e ativas no Supabase DEV. Os secrets
+necessários foram configurados; `supabase_url` e o segredo do worker estão no
+Vault, e os jobs definidos em
+`supabase/schedules/mercadolivre_orders_worker.sql` estão ativos:
+
+- `mercadolivre-orders-worker`: a cada minuto.
+- `mercadolivre-orders-missed-feeds`: a cada seis horas.
+
+O worker foi chamado pelo Cron e as respostas recentes em `net._http_response`
+confirmam HTTP 200, sem timeout, com `processed: 0`. A reconciliação manual
+autenticada também retornou HTTP 200 para uma conexão, uma página e zero eventos
+enfileirados. A API devolveu `messages: null` (tratado como página vazia); isso
+confirma que a consulta funciona, mas não exercita o processamento de uma
+notificação perdida. Os testes locais das Edge Functions passaram (12/12) e
+`deno check` passou.
+
+Ainda não há callback configurado no portal, evento `orders_v2` aceito para um
+vendedor conectado nem pedido real processado pelo worker. O teste anterior do
+callback com vendedor desconectado só confirmou o 404 esperado. Também não há
+medição representativa do caminho de sucesso; portanto, não prometer prazo de
+500 ms nem “tempo real”.
+
+Próximo passo para habilitar `orders_v2` no piloto:
+
+1. Obter um pedido de teste real e autorizado na conta conectada do DEV.
+2. Depois de configurar o callback privado no portal, confirmar que o evento
+   é aceito, enfileirado uma única vez e respondido com HTTP 200 em até 500 ms;
+   verificar que o worker busca o pedido e o grava no tenant correto.
+3. Acompanhar os resultados do Cron e repetir a reconciliação com um evento
+   disponível antes de considerar validada a recuperação de falhas.
+
+O segredo no caminho do callback é uma capability do endpoint, não uma
+assinatura criptográfica fornecida pelo Mercado Livre. Mantenha a URL privada,
+não a inclua em mensagens e não ative notificações antes de haver um pedido
+autorizado para validar o fluxo completo.
 
 O Streamlit Community Cloud e o Supabase DEV são ambientes gratuitos de piloto,
 sem garantias de produção. Só usar dados reais após revisar o conteúdo e

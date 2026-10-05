@@ -1,6 +1,7 @@
 
 from componentes import animar_pagina, cabecalho_pagina
 from integracao_mercadolivre import mostrar_conexao_mercadolivre
+from integracao_shopee import mostrar_conexao_shopee
 from secoes.marketplace import mostrar_marketplace
 
 
@@ -22,5 +23,6 @@ cabecalho_pagina(
 )
 
 mostrar_conexao_mercadolivre()
+mostrar_conexao_shopee()
 
 mostrar_marketplace()

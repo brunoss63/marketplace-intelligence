@@ -11,6 +11,10 @@ from integracao_mercadolivre import (
     capturar_callback_oauth,
     processar_callback_oauth,
 )
+from integracao_shopee import (
+    capturar_callback_oauth_shopee,
+    processar_callback_shopee,
+)
 
 
 st.set_page_config(
@@ -23,7 +27,9 @@ aplicar_estilo()
 marca_sidebar()
 exigir_autenticacao()
 capturar_callback_oauth()
+capturar_callback_oauth_shopee()
 processar_callback_oauth()
+processar_callback_shopee()
 animar_elementos_rolagem()
 
 
@@ -57,6 +63,11 @@ paginas = [
         "paginas/importar_dados.py",
         title="Importar dados",
         icon="⬆️"
+    ),
+    st.Page(
+        "paginas/administracao.py",
+        title="Administração",
+        icon="🛡️"
     ),
 ]
 
