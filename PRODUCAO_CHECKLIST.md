@@ -18,12 +18,15 @@
   está publicada; o owner confirmou a conexão inicial após renovar o Client
   Secret e atualizar os Secrets do Streamlit PROD.
 
-❌ **Não existe para PRODUÇÃO:**
+❌ **Ainda pendente para uso com cliente:**
 - OAuth Mercado Livre PROD conectado inicialmente pelo owner; teste de
   sincronização e acesso persistente ainda pendentes
-- OAuth Shopee em PROD
-- Persistência de login após F5/reconexão (migration aplicada e chave
-  configurada; publicação do código e validação ainda pendentes)
+- Fluxo próprio de convite/definição e recuperação de senha — sem isso o cliente
+  não consegue concluir o primeiro acesso sem intervenção manual do owner
+- Shopee automatizada em PROD; enquanto o OAuth não for aprovado, avaliar a
+  importação manual de arquivos Shopee como contingência
+- Persistência de login após F5/reconexão confirmada visualmente pelo owner;
+  ainda faltam os testes de logout/revogação e expiração
 - Backup manual e restauração testados (o plano Free não inclui backup automático)
 - Validação ponta a ponta com duas contas Auth reais; o teste transacional de RLS foi concluído com uma identidade sintética não associada
 
@@ -145,11 +148,15 @@
 - A orientação oficial para o Free é exportar regularmente com Supabase CLI
   (`supabase db dump`) e manter cópia fora do projeto. O procedimento oficial
   requer CLI, Docker Desktop e connection string/senha do banco.
-- Nenhum arquivo de backup foi criado. O destino local fora do repositório foi
-  escolhido, mas o Windows negou a consulta que confirmaria a criptografia do
-  volume; por segurança, a geração foi adiada até existir um destino
-  comprovadamente criptografado. Não armazenar dumps no repositório nem nos
-  Secrets do Streamlit, e não enviar a senha pelo chat.
+- Nenhum arquivo de backup foi criado. Para não depender de criptografia do
+  volume de destino, gerar o dump e criptografar o arquivo antes de gravá-lo em
+  armazenamento persistente (por exemplo, AES-256 via ferramenta aprovada).
+  Manter a chave/senha de cifragem separada do arquivo, não armazenar dumps no
+  repositório nem nos Secrets do Streamlit e não enviar senhas pelo chat.
+- A cifragem do arquivo resolve a proteção em repouso, mas não elimina os
+  pré-requisitos de CLI/Docker nem a necessidade de manusear a senha de conexão
+  Supabase de forma local e temporária. Ainda não executar até preparar e
+  aprovar esse procedimento e destino.
 - Documentação: [Backups](https://supabase.com/docs/guides/platform/backups) e
   [Backup/Restore via CLI](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
 
@@ -223,11 +230,31 @@ redirect URI e chave Fernet PROD somente nos Secrets do app
 `marketplace-intelligence-live`; não os adicione à `.streamlit/secrets.toml`
 ou ao repositório. Nunca compartilhe o Client Secret no chat.
 
-#### ✅ Tarefa 2.2: Registrar aplicação Shopee em PROD
-1. Acessar https://developer.shop.shopee.br (requere aprovação)
-2. Criar NOVA aplicação
-   - Environment: Production
-   - Redirect URI: `https://SEU_DOMINIO_PROD.streamlit.app/callback-shopee`
+#### ⏸️ Tarefa 2.2: Registrar aplicação Shopee em PROD — após fechar com o cliente
+Não iniciar o cadastro ou pedir credenciais antes de a negociação avançar.
+Quando o cliente confirmar que seguirá com a implantação, retomar esta tarefa.
+O cliente já vende na Shopee e esta implantação é para uma única loja. O caminho
+compatível é o cliente entrar no Open Platform com a própria conta Shopee Seller,
+criar o perfil “Shopee Seller” e registrar uma aplicação para a própria loja.
+Esse tipo de perfil não exige que o owner do Marketplace Intelligence tenha
+empresa registrada, mas restringe o app às lojas pertencentes a esse seller.
+Não criar esse perfil usando a conta do owner se a loja Shopee não pertencer a
+ele; não solicitar nem inserir credenciais/documentos do cliente em nome dele.
+
+O cliente deve concluir a verificação e aprovação exigidas pelo portal e
+compartilhar App ID/Secret com o owner somente por um canal seguro, nunca no
+chat ou no repositório. Depois, configurar o callback
+`https://marketplace-intelligence-live.streamlit.app/` e Secrets próprios de
+Shopee PROD. O suporte de schema já existe no Supabase PROD, mas OAuth/Shopee
+ainda não está habilitado no app.
+
+**Contingência enquanto a aprovação não sai:** a tela Importar Dados já permite
+selecionar `Shopee` como marketplace e importar CSV/XLSX com mapeamento para os
+campos canônicos. Isso permite cobrir dados Shopee por arquivo se o cliente
+conseguir exportá-los; ainda não foi validado um arquivo real exportado pela
+Shopee nem quais relatórios/colunas estão disponíveis na conta dele. Antes de
+prometer cobertura, testar uma amostra autorizada e documentar os campos e
+limites; dados que não existam no arquivo não serão sincronizados.
 
 #### ✅ Tarefa 2.3: Implementar configuração OAuth PROD
 O código seleciona credenciais e chave Fernet `MERCADOLIVRE_DEV_*` ou
@@ -274,11 +301,13 @@ OAuth ficam pendentes até a implementação e aprovação das integrações PRO
 - [ ] Confirmar que aparecem apenas para seu tenant (bruno.ribeirods99@gmail.com)
 
 #### ⏸️ Tarefa 4.2: Criar conta e tenant do cliente
-Não envie convite ainda. Embora o login por senha do owner já esteja validado,
-o app não tem telas próprias de definir/recuperar senha e o callback do convite
-do cliente ainda não foi testado no domínio PROD. Antes de convidar, implemente
-e valide esse fluxo de forma segura, resolva os bloqueadores de sessão e
-isolamento e obtenha o e-mail do cliente.
+Não envie convite ainda. O cliente precisa conseguir aceitar o convite e definir
+a senha inicial sem depender de um script executado localmente pelo owner. O
+fluxo de definição inicial/recuperação foi implementado localmente e passou em
+testes unitários e verificação sintática do JavaScript; ainda precisa ser
+publicado, testado com links válidos/expirados no domínio PROD e conferido com
+os templates/redirects de Auth antes de convidar. Também é necessário obter
+autorização e o e-mail individual do cliente.
 
 Depois de liberada a produção:
 1. Convide a conta individual em Supabase PROD → Auth → Users.
@@ -313,16 +342,15 @@ durante a validação transacional.
 ### **FASE 5: SEGURANÇA MÍNIMA (Dia 5)**
 
 #### ⏳ Tarefa 5.1: Persistir sessão PROD sem tokens no cookie
-A abordagem inicial mantinha os tokens Supabase somente em `st.session_state`,
-mas o owner confirmou que F5 encerrava o login. A implementação local substitui
-essa decisão: o cookie terá somente um identificador aleatório; tokens serão
-cifrados com Fernet e guardados no Supabase. A migration e
-`AUTH_SESSION_ENCRYPTION_KEY` ainda precisam ser aplicados antes do deploy.
-O cookie é Secure e SameSite=Lax, porém o componente Streamlit não permite
-HttpOnly. O DEV mantém seu fluxo de cookie existente.
+A migration e `AUTH_SESSION_ENCRYPTION_KEY` foram aplicadas, e o código foi
+publicado. O owner confirmou que, após F5, o painel reaparece e permanece
+autenticado. O cookie contém somente um identificador aleatório; tokens ficam
+cifrados no Supabase. O cookie é Secure e SameSite=Lax, mas o componente
+Streamlit não permite marcá-lo HttpOnly. O DEV mantém seu fluxo de cookie.
 - [x] Diagnosticar a perda de login após F5.
-- [ ] Aplicar migration, configurar a chave, publicar e validar persistência,
-  expiração em 30 dias e revogação no logout.
+- [x] Aplicar migration, configurar a chave e publicar a persistência.
+- [x] Validar que o owner retorna ao painel após F5.
+- [ ] Validar expiração e revogação no logout.
 
 #### ✅ Tarefa 5.2: Verificar RLS do Supabase
 No PROD, a consulta de policies confirmou as regras de isolamento por tenant
@@ -371,10 +399,13 @@ distintas; essa conta ainda não foi criada.
 - [ ] Cliente consegue conectar MercadoLivre (com app PROD)
 - [ ] Tokens são armazenados criptografados por tenant
 
-**Shopee OAuth:**
-- [ ] Bruno consegue conectar Shopee
-- [ ] Cliente consegue conectar Shopee
-- [ ] Status mostra "Conectado"
+**Shopee (automatizada ou por arquivo):**
+- [ ] Acordar se OAuth aprovado estará disponível no fechamento; até lá, avaliar
+  a importação manual como contingência
+- [ ] Testar arquivo real autorizado da Shopee com pedidos e/ou produtos/estoque
+  usando mapeamento manual, e confirmar os limites do formato
+- [ ] Se OAuth PROD for aprovado, validar conexão, pedidos, produtos/estoque e
+  isolamento dos dados no tenant correto
 
 **Funcionalidades:**
 - [ ] Importar dados funciona
@@ -405,36 +436,55 @@ distintas; essa conta ainda não foi criada.
      revisadas sem ampliar permissões ou habilitar tópicos não usados.
    - Não compartilhar o Client Secret no chat ou repositório.
 
-3. **Shopee em breve**
-   - Status: Ainda não tem OAuth pronto
-   - Solução: Adicionar quando estiver pronto
+3. **Shopee: OAuth suspenso até avançar o fechamento com o cliente**
+   - O owner informou que o cliente utiliza Shopee; ela não pode ficar como
+     “Em breve” nem ser retirada do escopo se a implantação for fechada.
+     O OAuth automatizado e o cadastro no portal ficam suspensos até o
+     fechamento, conforme decisão atual. A importação manual pode ser uma
+     contingência: a interface aceita Shopee e CSV/XLSX mapeável, mas a
+     compatibilidade com um export real da Shopee ainda precisa ser comprovada.
+   - As migrations de suporte Shopee já foram aplicadas no schema PROD, mas
+     `integracao_shopee.py` ainda rejeita qualquer ambiente diferente de
+     `development`. A sincronização real de pedidos/estoque em PROD não foi
+     validada.
+   - Retomar o registro/aprovação do app Shopee Open Platform para produção,
+     configurar o callback do deploy, obter os secrets PROD e habilitar OAuth
+     sem misturar credenciais DEV/PROD quando a negociação avançar.
+   - O owner confirmou que o cliente vende na Shopee e que não possui empresa
+     registrada. O perfil Partner Platform exigiria registro empresarial, mas
+     não é necessário para este piloto de uma loja: o cliente pode registrar
+     um app no perfil Shopee Seller, que só autoriza as próprias lojas dele.
+     Retomar o registro do app com o cliente somente quando a negociação
+     avançar; até lá, não coletar credenciais nem fazer alterações no portal.
+   - Antes do fechamento, validar se um arquivo Shopee autorizado cobre a
+     necessidade com importação manual. Se OAuth vier a ser necessário, validar
+     autorização de loja, armazenamento cifrado dos tokens, sincronização e
+     isolamento por tenant antes de habilitar o cliente.
 
-4. **Login PROD após F5/reconexão**
-   - O usuário confirmou que atualizar a página volta à tela de login. A causa
-     é que Streamlit mantém a sessão Supabase somente em memória em PROD.
-   - A implementação local prepara sessões persistentes sem gravar tokens no
-     cookie: o navegador terá apenas um identificador aleatório; access e
-     refresh tokens serão cifrados com Fernet antes de armazenar no Supabase.
-   - A sessão expira em 30 dias e logout revoga o registro. A migration
-     `20261006160000_persistent_auth_sessions.sql` foi aplicada ao Supabase
-     PROD, e o owner confirmou a configuração do secret
-     `AUTH_SESSION_ENCRYPTION_KEY`; falta publicar e validar a alteração.
+4. **Sessões PROD após F5/reconexão**
+   - A persistência server-side está publicada; tokens ficam cifrados no
+     Supabase e o cookie contém somente um identificador aleatório.
+   - O owner confirmou que, após F5, o painel volta automaticamente e permanece
+     autenticado. Ainda falta testar revogação no logout e reautenticação após
+     expiração/revogação.
    - O cookie é Secure e SameSite=Lax, mas o componente Streamlit não permite
-     marcá-lo HttpOnly; por isso ele contém apenas o identificador aleatório,
-     nunca os tokens.
+     marcá-lo HttpOnly; por isso ele nunca contém tokens.
 
 ---
 
 ## 📞 PRÓXIMAS AÇÕES
 
-1. Definir destino protegido e rotina do dump manual gratuito; preparar CLI e
-   Docker e gerar um backup sem expor a senha. Planejar restauração somente
-   após aprovar a pausa temporária de um projeto ativo ou outra alternativa.
-2. Publicar a implementação de sessões persistentes; validar F5, expiração e
-   logout no app PROD.
-3. Validar leitura/sincronização Mercado Livre e o fluxo de convite, logout e
-   novo login após refresh/reconexão.
-4. Só então cadastrar o cliente quando o e-mail dele estiver disponível.
+1. Publicar e validar no domínio PROD o fluxo de convite/definição da senha
+   inicial e recuperação; não convidar cliente até isso funcionar.
+2. Testar um arquivo Shopee autorizado na tela Importar Dados para decidir se
+   a importação manual cobre a necessidade enquanto OAuth aguarda aprovação.
+3. Validar leitura/sincronização do Mercado Livre e logout/revogação da sessão.
+4. Preparar backup manual criptografado em arquivo, com chave separada e
+   procedimento local para CLI/Docker/credencial; só gerar após aprovar o
+   destino e o método.
+5. Quando a negociação avançar, retomar perfil Seller, app Shopee OAuth e
+   Secrets PROD. Validar onboarding e isolamento com a conta do cliente antes
+   de liberar dados reais.
 
 ---
 
@@ -447,15 +497,17 @@ distintas; essa conta ainda não foi criada.
 - `AUTH_SESSION_ENCRYPTION_KEY` foi configurada pelo owner somente nos Secrets
   do Streamlit PROD; mantê-la estável e independente das chaves dos
   marketplaces, sem gravá-la em arquivos versionados ou no chat.
-- Ainda é necessário implementar o callback seguro para convite/definição de
-  senha antes de cadastrar o cliente.
-- O identificador de sessão ficará em cookie gerenciado pelo componente
-  Streamlit; tokens Supabase serão cifrados no Supabase. O cookie não é
+- O callback de navegador para convite/definição e recuperação de senha foi
+  implementado localmente; publicar e validar no domínio PROD, com callback do
+  Auth apontando para a raiz do app, antes de convidar o cliente.
+- O identificador de sessão fica em cookie gerenciado pelo componente
+  Streamlit; tokens Supabase são cifrados no Supabase. O cookie não é
   HttpOnly, uma limitação do componente, mas não conterá credenciais Supabase.
 
 ---
 
 **Estado atual:** deploy PROD de validação criado e login owner confirmado;
+persistência após F5 também confirmada pelo owner;
 teste transacional RLS concluído sem fixtures persistentes. O plano Free não
 tem backup automático; o dump manual foi adiado até confirmar armazenamento
 criptografado e a restauração ainda não foi testada. Resolva esses e os demais

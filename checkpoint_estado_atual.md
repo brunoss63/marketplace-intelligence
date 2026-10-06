@@ -14,8 +14,16 @@ investir em escala ou integrações que não façam parte do escopo desse client
   estoque está disponível, com ressalvas de validação de dados reais da conta.
 - A governança do tenant inclui papéis owner/member, controles administrativos e
   auditoria de acesso.
-- A Shopee tem uma base de OAuth e conexão segura, mas sincronização real de
-  pedidos/estoque não está operacional. Não é requisito universal para o piloto.
+- A Shopee tem uma base de OAuth, persistência cifrada e rotinas de
+  sincronização, mas ainda está bloqueada para `MI_ENV=production` e não foi
+  validada com loja/dados reais. Embora não seja requisito universal para todo
+  piloto, é requisito obrigatório para o cliente atual e bloqueia seu
+  lançamento PROD até haver app Shopee Open Platform aprovado e validação
+  ponta a ponta. Como o cliente já vende na Shopee e o piloto atende somente a
+  loja dele, a rota adequada é o próprio cliente registrar o app no perfil
+  Shopee Seller (limitado às lojas próprias), concluir a verificação e
+  compartilhar os dados do app por canal seguro; não é necessário perfil
+  Third-party Partner Platform para esse escopo de uma loja.
 - Nenhum primeiro cliente adicional foi cadastrado. Antes de acessar os dados
   de um cliente, obter autorização, acordar escopo e criar/acessar seu tenant de
   forma restrita.

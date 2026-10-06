@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.parse import quote
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from cryptography.fernet import Fernet
 
@@ -12,6 +12,7 @@ from autenticacao import (
     _COOKIE_SESSAO,
     _COOKIE_SESSAO_PROD,
     _hash_id_sessao_prod,
+    _html_fluxo_definicao_senha,
     _ler_sessao_cookie,
     _limpar_sessao,
     _preparar_cookie_sessao,
@@ -19,6 +20,8 @@ from autenticacao import (
     _persistir_sessao_cookie,
     _restaurar_sessao_persistente,
     _revogar_sessao_prod,
+    _solicitar_email_recuperacao,
+    _url_redirecionamento_autenticacao,
     _usar_cookie_sessao,
 )
 from streamlit.testing.v1 import AppTest
@@ -49,6 +52,49 @@ class _CookieManagerFake:
 
 
 class TestAuthSessionPersistence(unittest.TestCase):
+    def test_redirect_de_senha_usa_url_fixa_por_ambiente(self) -> None:
+        self.assertEqual(
+            _url_redirecionamento_autenticacao("production"),
+            "https://marketplace-intelligence-live.streamlit.app/",
+        )
+        self.assertEqual(
+            _url_redirecionamento_autenticacao("development"),
+            "https://marketplace-intelligence-dev.streamlit.app/",
+        )
+        with self.assertRaises(RuntimeError):
+            _url_redirecionamento_autenticacao("local")
+
+    def test_html_de_senha_trata_convite_e_recuperacao_no_navegador(self) -> None:
+        html = _html_fluxo_definicao_senha(
+            "https://example.supabase.co",
+            "sb_publishable_test",
+        )
+
+        self.assertIn('["invite", "recovery"]', html)
+        self.assertIn("window.location.hash", html)
+        self.assertIn("error_description", html)
+        self.assertIn('method: "PUT"', html)
+        self.assertIn("Bearer \" + accessToken", html)
+        self.assertIn('minlength="12"', html)
+        self.assertNotIn("service_role", html)
+
+    def test_email_recuperacao_usa_redirect_prod_fixo(self) -> None:
+        cliente = Mock()
+
+        _solicitar_email_recuperacao(
+            cliente,
+            "cliente@example.com",
+            "production",
+        )
+
+        cliente.auth.reset_password_email.assert_called_once_with(
+            "cliente@example.com",
+            options={
+                "redirect_to":
+                    "https://marketplace-intelligence-live.streamlit.app/",
+            },
+        )
+
     def test_cookie_de_sessao_e_exclusivo_do_ambiente_development(self) -> None:
         self.assertTrue(_usar_cookie_sessao("development"))
         self.assertFalse(_usar_cookie_sessao("production"))

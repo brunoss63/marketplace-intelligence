@@ -39,6 +39,174 @@ _COOKIE_SESSAO = "mi_auth_session"
 _COOKIE_SESSAO_PROD = "mi_auth_session_id"
 _COOKIE_MANAGER_SESSAO = "_mi_auth_cookie_manager"
 _DURACAO_COOKIE_SESSAO_DIAS = 30
+_URL_APP_AUTENTICACAO = {
+    "development": "https://marketplace-intelligence-dev.streamlit.app/",
+    "production": "https://marketplace-intelligence-live.streamlit.app/",
+}
+
+
+def _url_redirecionamento_autenticacao(ambiente: str) -> str:
+    try:
+        return _URL_APP_AUTENTICACAO[ambiente]
+    except KeyError as erro:
+        raise RuntimeError(
+            "O fluxo de senha exige ambiente development ou production."
+        ) from erro
+
+
+def _html_fluxo_definicao_senha(url: str, chave_publica: str) -> str:
+    html = """
+<div id="mi-auth-password-flow" hidden>
+  <style>
+    #mi-auth-password-flow {
+      box-sizing: border-box;
+      margin: 2rem auto;
+      max-width: 30rem;
+      padding: 1.5rem;
+      border: 1px solid rgba(128, 128, 128, .25);
+      border-radius: 1rem;
+    }
+    #mi-auth-password-flow label,
+    #mi-auth-password-flow input,
+    #mi-auth-password-flow button { display: block; width: 100%; }
+    #mi-auth-password-flow input,
+    #mi-auth-password-flow button {
+      box-sizing: border-box;
+      margin-top: .5rem;
+      padding: .7rem;
+    }
+    #mi-auth-password-flow label { margin-top: 1rem; }
+  </style>
+  <h2>Defina sua senha</h2>
+  <p id="mi-auth-password-message" role="status">
+    Validando o link de acesso...
+  </p>
+  <form id="mi-auth-password-form" hidden>
+    <label for="mi-auth-password">Nova senha</label>
+    <input id="mi-auth-password" type="password" minlength="12"
+           autocomplete="new-password" required>
+    <label for="mi-auth-password-confirm">Confirme a nova senha</label>
+    <input id="mi-auth-password-confirm" type="password" minlength="12"
+           autocomplete="new-password" required>
+    <button id="mi-auth-password-submit" type="submit">
+      Salvar senha
+    </button>
+  </form>
+</div>
+<script>
+(() => {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const accessToken = params.get("access_token");
+  const flowType = params.get("type");
+  const query = new URLSearchParams(window.location.search);
+  const hasAuthError = ["error", "error_description", "error_code"]
+      .some((key) => params.has(key) || query.has(key));
+  if (!["invite", "recovery"].includes(flowType) && !hasAuthError) return;
+
+  window.history.replaceState(null, "", window.location.pathname);
+  const flow = document.getElementById("mi-auth-password-flow");
+  const message = document.getElementById("mi-auth-password-message");
+  const form = document.getElementById("mi-auth-password-form");
+  flow.hidden = false;
+  const hideLogin = () => {
+    const loginRow = document.querySelector(".st-key-mi-login-card")
+        ?.closest('[data-testid="stHorizontalBlock"]');
+    if (!loginRow) return false;
+    loginRow.hidden = true;
+    return true;
+  };
+  if (!hideLogin()) {
+    const observer = new MutationObserver(() => {
+      if (hideLogin()) observer.disconnect();
+    });
+    observer.observe(document.body, {childList: true, subtree: true});
+  }
+
+  if (!accessToken || hasAuthError) {
+    message.textContent =
+      "Este link é inválido ou expirou. Solicite um novo link.";
+    return;
+  }
+
+  form.hidden = false;
+  message.textContent =
+    "Escolha uma senha com pelo menos 12 caracteres.";
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const password = document.getElementById("mi-auth-password").value;
+    const confirmation =
+      document.getElementById("mi-auth-password-confirm").value;
+    if (password.length < 12 || password !== confirmation) {
+      message.textContent = password !== confirmation
+        ? "As senhas não coincidem."
+        : "A senha precisa ter pelo menos 12 caracteres.";
+      return;
+    }
+
+    const submit = document.getElementById("mi-auth-password-submit");
+    submit.disabled = true;
+    message.textContent = "Salvando a senha...";
+    try {
+      const response = await fetch(
+        __SUPABASE_URL__ + "/auth/v1/user",
+        {
+          method: "PUT",
+          headers: {
+            "apikey": __SUPABASE_PUBLIC_KEY__,
+            "Authorization": "Bearer " + accessToken,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({password})
+        }
+      );
+      if (!response.ok) {
+        throw new Error("LINK_INVALIDO_OU_EXPIRADO");
+      }
+      form.hidden = true;
+      message.textContent =
+        "Senha atualizada. Você já pode entrar no painel.";
+      const link = document.createElement("a");
+      link.href = window.location.pathname;
+      link.textContent = "Voltar para o login";
+      message.appendChild(document.createElement("br"));
+      message.appendChild(link);
+    } catch (error) {
+      message.textContent =
+        error.message === "LINK_INVALIDO_OU_EXPIRADO"
+          ? "O link expirou ou não é válido. Solicite um novo link."
+          : "Não foi possível atualizar a senha. Tente novamente.";
+      submit.disabled = false;
+    }
+  });
+})();
+</script>
+"""
+    url_json = json.dumps(url).replace("<", "\\u003c")
+    chave_json = json.dumps(chave_publica).replace("<", "\\u003c")
+    return html.replace("__SUPABASE_URL__", url_json).replace(
+        "__SUPABASE_PUBLIC_KEY__",
+        chave_json,
+    )
+
+
+def _solicitar_email_recuperacao(
+    cliente: Client,
+    email: str,
+    ambiente: str,
+) -> None:
+    try:
+        cliente.auth.reset_password_email(
+            email,
+            options={
+                "redirect_to": _url_redirecionamento_autenticacao(ambiente),
+            },
+        )
+    except AuthApiError as erro:
+        _logger.warning(
+            "Falha ao solicitar e-mail de recuperação; HTTP %s, código %s.",
+            erro.status,
+            erro.code or "indisponível",
+        )
 
 
 def _nome_exibicao(usuario: object, email: str) -> str:
@@ -511,6 +679,16 @@ def _renderizar_login(
     cookie_manager: stx.CookieManager,
     ambiente: str,
 ) -> None:
+    url_supabase, chave_publica = _credenciais_supabase(ambiente)
+    if url_supabase is None or chave_publica is None:
+        raise RuntimeError(
+            "As credenciais públicas do Supabase são necessárias para "
+            "definir a senha."
+        )
+    st.html(
+        _html_fluxo_definicao_senha(url_supabase, chave_publica),
+        unsafe_allow_javascript=True,
+    )
     st.markdown('<div class="mi-login-layout"></div>', unsafe_allow_html=True)
     painel, formulario = st.columns([1.05, .95], gap="large")
 
@@ -549,6 +727,33 @@ def _renderizar_login(
                     type="primary",
                     icon=":material/arrow_forward:",
                 )
+
+            with st.form("mi_password_recovery_form"):
+                st.markdown("### Esqueceu sua senha?")
+                email_recuperacao = st.text_input(
+                    "E-mail para recuperação",
+                    autocomplete="email",
+                    placeholder="voce@empresa.com",
+                ).strip()
+                solicitar_recuperacao = st.form_submit_button(
+                    "Enviar link para definir nova senha",
+                )
+
+            if solicitar_recuperacao:
+                if not email_recuperacao:
+                    st.error("Informe o e-mail da sua conta.")
+                else:
+                    _solicitar_email_recuperacao(
+                        cliente,
+                        email_recuperacao,
+                        ambiente,
+                    )
+                    st.info(
+                        "Por segurança, não confirmamos se o endereço existe "
+                        "nem se o link foi enviado. Se a conta estiver "
+                        "cadastrada, verifique a caixa de entrada e spam; "
+                        "caso não receba, fale com o responsável pelo acesso."
+                    )
 
             if not enviar:
                 return
