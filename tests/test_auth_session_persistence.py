@@ -1,6 +1,7 @@
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
 from unittest.mock import Mock, patch
@@ -70,16 +71,26 @@ class TestAuthSessionPersistence(unittest.TestCase):
             "sb_publishable_test",
         )
 
-        self.assertIn('["invite", "recovery"]', html)
-        self.assertIn("const browserWindow = window.top", html)
-        self.assertIn("browserWindow.location.hash", html)
-        self.assertIn("appWindow.document", html)
-        self.assertIn("browserWindow.history.replaceState", html)
-        self.assertIn("error_description", html)
-        self.assertIn('method: "PUT"', html)
-        self.assertIn("Bearer \" + accessToken", html)
+        self.assertIn('src="/app/static/auth_password_flow.js"', html)
+        self.assertIn(
+            'data-supabase-url="https://example.supabase.co"',
+            html,
+        )
+        self.assertIn(
+            'data-supabase-public-key="sb_publishable_test"',
+            html,
+        )
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "static"
+            / "auth_password_flow.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("window.top", script)
+        self.assertIn("error_description", script)
+        self.assertIn('method: "PUT"', script)
+        self.assertIn("accessToken", script)
         self.assertIn('minlength="12"', html)
-        self.assertNotIn("service_role", html)
+        self.assertNotIn("service_role", html + script)
 
     def test_email_recuperacao_usa_redirect_prod_fixo(self) -> None:
         cliente = Mock()

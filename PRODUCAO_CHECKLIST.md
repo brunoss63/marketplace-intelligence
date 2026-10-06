@@ -22,9 +22,10 @@
 - OAuth Mercado Livre PROD conectado inicialmente pelo owner; teste de
   sincronização e acesso persistente ainda pendentes
 - Fluxo próprio de convite/definição e recuperação de senha implementado, mas
-  ainda bloqueado: o smoke test PROD mostrou que o JavaScript em `st.html` não
-  executa no deploy. A correção local usa um iframe HTML; não convidar o cliente
-  até publicar e validar o formulário no navegador PROD.
+  ainda bloqueado: o smoke test PROD mostrou que scripts inline ficam inertes
+  no deploy. A correção local carrega um arquivo JavaScript estático do próprio
+  app; não convidar o cliente até publicar e validar o formulário no navegador
+  PROD.
 - Shopee automatizada em PROD; enquanto o OAuth não for aprovado, avaliar a
   importação manual de arquivos Shopee como contingência
 - Persistência de login após F5/reconexão confirmada visualmente pelo owner;
@@ -305,12 +306,13 @@ OAuth ficam pendentes até a implementação e aprovação das integrações PRO
 #### ⏸️ Tarefa 4.2: Criar conta e tenant do cliente
 Não envie convite ainda. O cliente precisa conseguir aceitar o convite e definir
 a senha inicial sem depender de um script executado localmente pelo owner. O
-fluxo foi publicado em `d1ad9b0`, mas o smoke test no domínio PROD mostrou que o
-JavaScript dentro de `st.html` não executa. A correção local troca a exibição
-para `st.iframe` e acessa o fragmento de autenticação pela janela do app; ela
-precisa ser publicada e validada no navegador antes de convidar. Depois, ainda
-será necessário testar links válidos/expirados e conferir os templates/redirects
-de Auth. Também é necessário obter autorização e o e-mail individual do cliente.
+fluxo foi publicado em `d1ad9b0`, mas o smoke test no domínio PROD mostrou que
+scripts inline permanecem inertes tanto em `st.html` quanto em `st.iframe`. A
+correção local habilita o serviço estático do Streamlit e carrega o callback
+JavaScript de um arquivo da mesma origem; ela precisa ser publicada e validada
+no navegador antes de convidar. Depois, ainda será necessário testar links
+válidos/expirados e conferir os templates/redirects de Auth. Também é necessário
+obter autorização e o e-mail individual do cliente.
 
 Depois de liberada a produção:
 1. Convide a conta individual em Supabase PROD → Auth → Users.
@@ -500,10 +502,11 @@ distintas; essa conta ainda não foi criada.
 - `AUTH_SESSION_ENCRYPTION_KEY` foi configurada pelo owner somente nos Secrets
   do Streamlit PROD; mantê-la estável e independente das chaves dos
   marketplaces, sem gravá-la em arquivos versionados ou no chat.
-- O callback para convite/definição e recuperação está publicado, mas o primeiro
-  smoke test no navegador PROD falhou porque o script em `st.html` permaneceu
-  inerte. A correção local usa `st.iframe`; publicar e confirmar a execução,
-  o formulário e a remoção do fragmento antes de convidar o cliente.
+- O callback para convite/definição e recuperação está publicado, mas o smoke
+  test no navegador PROD confirmou que scripts inline permanecem inertes. A
+  correção local carrega o callback de `static/auth_password_flow.js` pela
+  mesma origem; publicar e confirmar a execução, o formulário e a remoção do
+  fragmento antes de convidar o cliente.
 - O identificador de sessão fica em cookie gerenciado pelo componente
   Streamlit; tokens Supabase são cifrados no Supabase. O cookie não é
   HttpOnly, uma limitação do componente, mas não conterá credenciais Supabase.
