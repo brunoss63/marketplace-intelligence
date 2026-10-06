@@ -71,7 +71,10 @@ class TestAuthSessionPersistence(unittest.TestCase):
         )
 
         self.assertIn('["invite", "recovery"]', html)
-        self.assertIn("window.location.hash", html)
+        self.assertIn("const browserWindow = window.top", html)
+        self.assertIn("browserWindow.location.hash", html)
+        self.assertIn("appWindow.document", html)
+        self.assertIn("browserWindow.history.replaceState", html)
         self.assertIn("error_description", html)
         self.assertIn('method: "PUT"', html)
         self.assertIn("Bearer \" + accessToken", html)

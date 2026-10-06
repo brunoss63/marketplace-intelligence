@@ -95,21 +95,33 @@ def _html_fluxo_definicao_senha(url: str, chave_publica: str) -> str:
 </div>
 <script>
 (() => {
-  const params = new URLSearchParams(window.location.hash.slice(1));
+  const appWindow = window.parent;
+  const browserWindow = window.top;
+  const params = new URLSearchParams(browserWindow.location.hash.slice(1));
   const accessToken = params.get("access_token");
   const flowType = params.get("type");
-  const query = new URLSearchParams(window.location.search);
+  const query = new URLSearchParams(browserWindow.location.search);
   const hasAuthError = ["error", "error_description", "error_code"]
       .some((key) => params.has(key) || query.has(key));
   if (!["invite", "recovery"].includes(flowType) && !hasAuthError) return;
 
-  window.history.replaceState(null, "", window.location.pathname);
+  browserWindow.history.replaceState(
+    null,
+    "",
+    browserWindow.location.pathname + browserWindow.location.search,
+  );
+  appWindow.history.replaceState(
+    null,
+    "",
+    appWindow.location.pathname + appWindow.location.search,
+  );
   const flow = document.getElementById("mi-auth-password-flow");
   const message = document.getElementById("mi-auth-password-message");
   const form = document.getElementById("mi-auth-password-form");
   flow.hidden = false;
   const hideLogin = () => {
-    const loginRow = document.querySelector(".st-key-mi-login-card")
+    const loginRow = appWindow.document
+        .querySelector(".st-key-mi-login-card")
         ?.closest('[data-testid="stHorizontalBlock"]');
     if (!loginRow) return false;
     loginRow.hidden = true;
@@ -119,7 +131,10 @@ def _html_fluxo_definicao_senha(url: str, chave_publica: str) -> str:
     const observer = new MutationObserver(() => {
       if (hideLogin()) observer.disconnect();
     });
-    observer.observe(document.body, {childList: true, subtree: true});
+    observer.observe(appWindow.document.body, {
+      childList: true,
+      subtree: true,
+    });
   }
 
   if (!accessToken || hasAuthError) {
@@ -166,7 +181,8 @@ def _html_fluxo_definicao_senha(url: str, chave_publica: str) -> str:
       message.textContent =
         "Senha atualizada. Você já pode entrar no painel.";
       const link = document.createElement("a");
-      link.href = window.location.pathname;
+      link.href = browserWindow.location.pathname;
+      link.target = "_top";
       link.textContent = "Voltar para o login";
       message.appendChild(document.createElement("br"));
       message.appendChild(link);
@@ -685,9 +701,9 @@ def _renderizar_login(
             "As credenciais públicas do Supabase são necessárias para "
             "definir a senha."
         )
-    st.html(
+    st.iframe(
         _html_fluxo_definicao_senha(url_supabase, chave_publica),
-        unsafe_allow_javascript=True,
+        height="content",
     )
     st.markdown('<div class="mi-login-layout"></div>', unsafe_allow_html=True)
     painel, formulario = st.columns([1.05, .95], gap="large")
