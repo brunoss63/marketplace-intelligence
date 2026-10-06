@@ -268,6 +268,9 @@ exigir novo login. Isso evita expor tokens Supabase em JavaScript sem contratar
 um gateway/backend; não oferece persistência por cookie `HttpOnly`. Se login
 persistente se tornar requisito, será necessário desenhar e hospedar uma camada
 de autenticação server-side separada.
+- [x] Validar no deploy publicado (6 de outubro de 2026): login owner refeito
+  após a atualização, painel autenticado carregado e cookie
+  `mi_auth_session` ausente do navegador após a autenticação.
 
 #### ✅ Tarefa 5.2: Verificar RLS do Supabase
 ```sql
@@ -299,11 +302,12 @@ USING (tenant_id = (
 #### ✅ Checklist de Validação
 
 **Login & Sessão:**
-- [ ] Consegue fazer login com bruno.ribeirods99@gmail.com
+- [x] Consegue fazer login com bruno.ribeirods99@gmail.com no deploy PROD.
 - [ ] Consegue fazer login com cliente@example.com
 - [ ] Logout funciona
-- [ ] Refresh da página não perde a sessão
-- [ ] Fechar e reabrir navegador mantém a sessão
+- [ ] Validar logout e a reautenticação quando necessária após refresh/reconexão.
+- Não manter login ao fechar/reabrir o navegador é comportamento intencional do
+  modo server-side sem cookie persistente.
 
 **Isolamento de dados:**
 - [ ] Bruno vê apenas seus dados fictícios
