@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,8 @@ from supabase_auth.errors import AuthApiError
 from componentes import renderizar_painel_login
 
 
+_logger = logging.getLogger(__name__)
+_CHAVE_CONFIG_AUTH_LOGADO = "_mi_auth_runtime_config_logged"
 _CHAVE_COOKIE_PROD_LIMPO = "_mi_prod_auth_cookie_cleared"
 _CHAVE_ID_SESSAO_PROD = "_mi_auth_session_id"
 _CHAVES_SESSAO = (
@@ -30,6 +33,7 @@ _CHAVES_SESSAO = (
     "_mi_tenant_role",
     _CHAVE_ID_SESSAO_PROD,
     _CHAVE_COOKIE_PROD_LIMPO,
+    _CHAVE_CONFIG_AUTH_LOGADO,
 )
 _COOKIE_SESSAO = "mi_auth_session"
 _COOKIE_SESSAO_PROD = "mi_auth_session_id"
@@ -217,6 +221,10 @@ def _restaurar_sessao_persistente(
     cookie_manager: stx.CookieManager,
 ) -> tuple[str, str] | None:
     session_id = _id_sessao_cookie_prod(cookie_manager)
+    _logger.info(
+        "Restauração de sessão PROD iniciada; cookie presente=%s.",
+        session_id is not None,
+    )
     if session_id is None:
         return None
     try:
@@ -231,6 +239,9 @@ def _restaurar_sessao_persistente(
     ).execute()
     registros = resposta.data or []
     if not registros:
+        _logger.warning(
+            "Restauração de sessão PROD não encontrou registro ativo."
+        )
         _expirar_cookie_sessao_prod(cookie_manager, existe=True)
         return None
     if len(registros) != 1:
@@ -260,6 +271,7 @@ def _restaurar_sessao_persistente(
         ) from erro
 
     st.session_state[_CHAVE_ID_SESSAO_PROD] = session_id
+    _logger.info("Sessão de autenticação PROD restaurada.")
     return access_token, refresh_token
 
 
@@ -273,6 +285,10 @@ def _persistir_sessao_prod(
     fernet = _fernet_sessao_autenticacao()
     session_id = st.session_state.get(_CHAVE_ID_SESSAO_PROD)
     nova_sessao = not isinstance(session_id, str) or not session_id
+    _logger.info(
+        "Persistência de sessão PROD iniciada; registro novo=%s.",
+        nova_sessao,
+    )
     if nova_sessao:
         session_id = token_urlsafe(32)
     session_hash = _hash_id_sessao_prod(session_id)
@@ -315,6 +331,7 @@ def _persistir_sessao_prod(
 
     st.session_state[_CHAVE_ID_SESSAO_PROD] = session_id
     _definir_cookie_sessao_prod(cookie_manager, session_id)
+    _logger.info("Sessão de autenticação PROD persistida.")
 
 
 def _revogar_sessao_prod(session_id: str) -> None:
@@ -676,6 +693,13 @@ def exigir_autenticacao() -> None:
     """Bloqueia o painel até existir uma sessão Supabase autorizada."""
 
     ambiente = _configuracao("MI_ENV")
+    if not st.session_state.get(_CHAVE_CONFIG_AUTH_LOGADO):
+        _logger.info(
+            "Ambiente de autenticação selecionado: %s (origem MI_ENV: %s).",
+            ambiente or "ausente",
+            obter_origem_configuracao("MI_ENV"),
+        )
+        st.session_state[_CHAVE_CONFIG_AUTH_LOGADO] = True
     if ambiente not in {"local", "development", "production"}:
         st.error(
             "Configure MI_ENV explicitamente como 'local', 'development' "

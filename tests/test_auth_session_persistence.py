@@ -140,23 +140,30 @@ class TestAuthSessionPersistence(unittest.TestCase):
         cliente = SimpleNamespace(table=lambda _: table)
         session_state: dict[str, object] = {}
 
-        with (
-            patch("autenticacao.st.session_state", session_state),
-            patch("autenticacao._cookie_seguro", return_value=True),
-            patch(
-                "autenticacao.obter_configuracao",
-                return_value=chave.decode("ascii"),
-            ),
-        ):
-            _persistir_sessao_prod(
-                cookies,
-                cliente,
-                "access-token",
-                "refresh-token",
-                "user-id",
-            )
+        with self.assertLogs("autenticacao", level="INFO") as registros_log:
+            with (
+                patch("autenticacao.st.session_state", session_state),
+                patch("autenticacao._cookie_seguro", return_value=True),
+                patch(
+                    "autenticacao.obter_configuracao",
+                    return_value=chave.decode("ascii"),
+                ),
+            ):
+                _persistir_sessao_prod(
+                    cookies,
+                    cliente,
+                    "access-token",
+                    "refresh-token",
+                    "user-id",
+                )
 
         session_id = session_state[_CHAVE_ID_SESSAO_PROD]
+        mensagens_log = "\n".join(registros_log.output)
+        self.assertIn("Persistência de sessão PROD iniciada", mensagens_log)
+        self.assertIn("Sessão de autenticação PROD persistida", mensagens_log)
+        self.assertNotIn("access-token", mensagens_log)
+        self.assertNotIn("refresh-token", mensagens_log)
+        self.assertNotIn(str(session_id), mensagens_log)
         self.assertEqual(cookies.values[_COOKIE_SESSAO_PROD], session_id)
         self.assertEqual(cookies.values.keys(), {_COOKIE_SESSAO_PROD})
         persisted = persisted_rows[0]
