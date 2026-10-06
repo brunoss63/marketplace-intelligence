@@ -15,13 +15,15 @@
 - App DEV e deploy PROD de validação publicados separadamente no Streamlit Community Cloud
 - Schema, RLS, e multi-tenant implementados
 - Aplicações OAuth separadas para Mercado Livre DEV e PROD; a integração PROD
-  foi preparada localmente, mas ainda não publicada nem ativada por secrets.
+  está publicada; o owner confirmou a conexão inicial após renovar o Client
+  Secret e atualizar os Secrets do Streamlit PROD.
 
 ❌ **Não existe para PRODUÇÃO:**
-- OAuth Mercado Livre em PROD validado (cadastro criado; credenciais, secrets e
-  teste real ainda pendentes)
+- OAuth Mercado Livre PROD conectado inicialmente pelo owner; teste de
+  sincronização e acesso persistente ainda pendentes
 - OAuth Shopee em PROD
-- Persistência de login entre reconexões do Streamlit (PROD usa sessão server-side temporária)
+- Persistência de login após F5/reconexão (migration aplicada e chave
+  configurada; publicação do código e validação ainda pendentes)
 - Backup manual e restauração testados (o plano Free não inclui backup automático)
 - Validação ponta a ponta com duas contas Auth reais; o teste transacional de RLS foi concluído com uma identidade sintética não associada
 
@@ -310,21 +312,17 @@ durante a validação transacional.
 
 ### **FASE 5: SEGURANÇA MÍNIMA (Dia 5)**
 
-#### ✅ Tarefa 5.1: Remover tokens de cookies no PROD
-**Concluída para o escopo gratuito escolhido:** no ambiente `production`, os
-tokens Supabase ficam apenas em `st.session_state` server-side. O app não os
-grava nem restaura de cookies e remove um cookie de autenticação legado na
-primeira execução da sessão. O DEV mantém seu comportamento de cookie para
-testes.
-
-Como a sessão depende da conexão do Streamlit, uma atualização/reconexão pode
-exigir novo login. Isso evita expor tokens Supabase em JavaScript sem contratar
-um gateway/backend; não oferece persistência por cookie `HttpOnly`. Se login
-persistente se tornar requisito, será necessário desenhar e hospedar uma camada
-de autenticação server-side separada.
-- [x] Validar no deploy publicado (6 de outubro de 2026): login owner refeito
-  após a atualização, painel autenticado carregado e cookie
-  `mi_auth_session` ausente do navegador após a autenticação.
+#### ⏳ Tarefa 5.1: Persistir sessão PROD sem tokens no cookie
+A abordagem inicial mantinha os tokens Supabase somente em `st.session_state`,
+mas o owner confirmou que F5 encerrava o login. A implementação local substitui
+essa decisão: o cookie terá somente um identificador aleatório; tokens serão
+cifrados com Fernet e guardados no Supabase. A migration e
+`AUTH_SESSION_ENCRYPTION_KEY` ainda precisam ser aplicados antes do deploy.
+O cookie é Secure e SameSite=Lax, porém o componente Streamlit não permite
+HttpOnly. O DEV mantém seu fluxo de cookie existente.
+- [x] Diagnosticar a perda de login após F5.
+- [ ] Aplicar migration, configurar a chave, publicar e validar persistência,
+  expiração em 30 dias e revogação no logout.
 
 #### ✅ Tarefa 5.2: Verificar RLS do Supabase
 No PROD, a consulta de policies confirmou as regras de isolamento por tenant
@@ -357,10 +355,9 @@ distintas; essa conta ainda não foi criada.
 **Login & Sessão:**
 - [x] Consegue fazer login com bruno.ribeirods99@gmail.com no deploy PROD.
 - [ ] Consegue fazer login com cliente@example.com
-- [ ] Logout funciona
-- [ ] Validar logout e a reautenticação quando necessária após refresh/reconexão.
-- Não manter login ao fechar/reabrir o navegador é comportamento intencional do
-  modo server-side sem cookie persistente.
+- [ ] Logout revoga a sessão persistida
+- [ ] O login owner persiste após F5 e reconexão do Streamlit.
+- [ ] Reautenticação funciona após expiração ou revogação da sessão.
 
 **Isolamento de dados:**
 - [x] RLS está ativo nas 12 tabelas públicas e o teste transacional acima
@@ -399,26 +396,32 @@ distintas; essa conta ainda não foi criada.
      definir destino protegido para o dump manual e liberar espaço para um
      teste de restauração sem interromper PROD.
 
-2. **OAuth Mercado Livre PROD cadastrado, porém ainda não habilitado**
-   - A aplicação independente usa o callback HTTPS do deploy PROD; código e
-     testes estão publicados em `main-prod`. A tela de login do deploy voltou
-     a responder após a atualização, mas os quatro secrets ainda não foram
-     configurados.
+2. **OAuth Mercado Livre PROD conectado inicialmente**
+   - A aplicação independente usa o callback HTTPS do deploy PROD; o owner
+     confirmou a autorização inicial depois de renovar a credencial e atualizar
+     os Secrets no Streamlit. Ainda falta validar leitura/sincronização.
    - O portal indica segurança em 70% e a aplicação não está certificada.
      A conta foi verificada por telefone; as opções configuradas foram
      revisadas sem ampliar permissões ou habilitar tópicos não usados.
-   - Por prudência, rotacione o Client Secret no portal antes de adicioná-lo
-     aos Secrets do Streamlit PROD. Nunca o compartilhe no chat.
-   - Não conectar nem sincronizar uma conta até configurar os quatro secrets
-     no app e validar o OAuth real.
+   - Não compartilhar o Client Secret no chat ou repositório.
 
 3. **Shopee em breve**
    - Status: Ainda não tem OAuth pronto
    - Solução: Adicionar quando estiver pronto
 
-4. **Login PROD não persiste entre reconexões**
-   - Decisão: manter tokens somente na sessão server-side do Streamlit para
-     preservar o plano gratuito; um novo login pode ser exigido após refresh.
+4. **Login PROD após F5/reconexão**
+   - O usuário confirmou que atualizar a página volta à tela de login. A causa
+     é que Streamlit mantém a sessão Supabase somente em memória em PROD.
+   - A implementação local prepara sessões persistentes sem gravar tokens no
+     cookie: o navegador terá apenas um identificador aleatório; access e
+     refresh tokens serão cifrados com Fernet antes de armazenar no Supabase.
+   - A sessão expira em 30 dias e logout revoga o registro. A migration
+     `20261006160000_persistent_auth_sessions.sql` foi aplicada ao Supabase
+     PROD, e o owner confirmou a configuração do secret
+     `AUTH_SESSION_ENCRYPTION_KEY`; falta publicar e validar a alteração.
+   - O cookie é Secure e SameSite=Lax, mas o componente Streamlit não permite
+     marcá-lo HttpOnly; por isso ele contém apenas o identificador aleatório,
+     nunca os tokens.
 
 ---
 
@@ -427,10 +430,10 @@ distintas; essa conta ainda não foi criada.
 1. Definir destino protegido e rotina do dump manual gratuito; preparar CLI e
    Docker e gerar um backup sem expor a senha. Planejar restauração somente
    após aprovar a pausa temporária de um projeto ativo ou outra alternativa.
-2. Concluir verificação de segurança da aplicação Mercado Livre, publicar a
-   integração PROD, configurar secrets direto no Streamlit e validar OAuth
-   antes de sincronizar.
-3. Validar convite, logout e novo login após refresh/reconexão.
+2. Publicar a implementação de sessões persistentes; validar F5, expiração e
+   logout no app PROD.
+3. Validar leitura/sincronização Mercado Livre e o fluxo de convite, logout e
+   novo login após refresh/reconexão.
 4. Só então cadastrar o cliente quando o e-mail dele estiver disponível.
 
 ---
@@ -441,11 +444,14 @@ distintas; essa conta ainda não foi criada.
   Community Cloud; não gravar os valores em arquivos versionados.
 - App DEV e `MI_ENV` local continuam isolados do banco PROD.
 - Login owner no domínio PROD validado.
+- `AUTH_SESSION_ENCRYPTION_KEY` foi configurada pelo owner somente nos Secrets
+  do Streamlit PROD; mantê-la estável e independente das chaves dos
+  marketplaces, sem gravá-la em arquivos versionados ou no chat.
 - Ainda é necessário implementar o callback seguro para convite/definição de
   senha antes de cadastrar o cliente.
-- A persistência de login por cookie `HttpOnly` exigiria uma camada de
-  autenticação externa; o plano atual usa somente a sessão temporária do
-  Streamlit para manter custo zero.
+- O identificador de sessão ficará em cookie gerenciado pelo componente
+  Streamlit; tokens Supabase serão cifrados no Supabase. O cookie não é
+  HttpOnly, uma limitação do componente, mas não conterá credenciais Supabase.
 
 ---
 

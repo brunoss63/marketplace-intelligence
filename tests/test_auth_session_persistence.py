@@ -1,13 +1,24 @@
 import json
 import unittest
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from urllib.parse import quote
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet
+
 from autenticacao import (
+    _CHAVE_ID_SESSAO_PROD,
     _COOKIE_SESSAO,
+    _COOKIE_SESSAO_PROD,
+    _hash_id_sessao_prod,
     _ler_sessao_cookie,
+    _limpar_sessao,
     _preparar_cookie_sessao,
+    _persistir_sessao_prod,
     _persistir_sessao_cookie,
+    _restaurar_sessao_persistente,
+    _revogar_sessao_prod,
     _usar_cookie_sessao,
 )
 from streamlit.testing.v1 import AppTest
@@ -100,6 +111,271 @@ class TestAuthSessionPersistence(unittest.TestCase):
 
         self.assertIsNone(cookies.last_set)
         self.assertNotIn(_COOKIE_SESSAO, cookies.values)
+
+    def test_id_sessao_prod_e_hashado_antes_de_usar_no_banco(self) -> None:
+        session_id = "a" * 43
+        self.assertEqual(len(_hash_id_sessao_prod(session_id)), 64)
+        with self.assertRaises(RuntimeError):
+            _hash_id_sessao_prod("access-token")
+
+    def test_sessao_prod_persiste_somente_tokens_cifrados_e_id_no_cookie(
+        self,
+    ) -> None:
+        chave = Fernet.generate_key()
+        fernet = Fernet(chave)
+        cookies = _CookieManagerFake()
+        persisted_rows: list[dict[str, str]] = []
+        table = SimpleNamespace(
+            insert=lambda dados: (
+                persisted_rows.append(dados)
+                or SimpleNamespace(
+                    select=lambda _: SimpleNamespace(
+                        execute=lambda: SimpleNamespace(
+                            data=[{"session_hash": dados["session_hash"]}]
+                        )
+                    )
+                )
+            )
+        )
+        cliente = SimpleNamespace(table=lambda _: table)
+        session_state: dict[str, object] = {}
+
+        with (
+            patch("autenticacao.st.session_state", session_state),
+            patch("autenticacao._cookie_seguro", return_value=True),
+            patch(
+                "autenticacao.obter_configuracao",
+                return_value=chave.decode("ascii"),
+            ),
+        ):
+            _persistir_sessao_prod(
+                cookies,
+                cliente,
+                "access-token",
+                "refresh-token",
+                "user-id",
+            )
+
+        session_id = session_state[_CHAVE_ID_SESSAO_PROD]
+        self.assertEqual(cookies.values[_COOKIE_SESSAO_PROD], session_id)
+        self.assertEqual(cookies.values.keys(), {_COOKIE_SESSAO_PROD})
+        persisted = persisted_rows[0]
+        self.assertNotIn("access-token", persisted["access_token_encrypted"])
+        self.assertNotIn("refresh-token", persisted["refresh_token_encrypted"])
+        expires_at = datetime.fromisoformat(persisted["expires_at"])
+        self.assertGreater(expires_at, datetime.now(timezone.utc))
+        self.assertLessEqual(
+            expires_at,
+            datetime.now(timezone.utc) + timedelta(days=30, minutes=1),
+        )
+        self.assertEqual(
+            fernet.decrypt(
+                persisted["access_token_encrypted"].encode("ascii")
+            ).decode("utf-8"),
+            "access-token",
+        )
+        self.assertEqual(
+            fernet.decrypt(
+                persisted["refresh_token_encrypted"].encode("ascii")
+            ).decode("utf-8"),
+            "refresh-token",
+        )
+        self.assertEqual(
+            persisted["session_hash"],
+            _hash_id_sessao_prod(str(session_id)),
+        )
+        self.assertIsNotNone(cookies.last_set)
+        assert cookies.last_set is not None
+        cookie_name, cookie_value, cookie_options = cookies.last_set
+        self.assertEqual(cookie_name, _COOKIE_SESSAO_PROD)
+        self.assertEqual(cookie_value, session_id)
+        self.assertEqual(cookie_options["max_age"], 30 * 24 * 60 * 60)
+        self.assertEqual(cookie_options["path"], "/")
+        self.assertIs(cookie_options["secure"], True)
+        self.assertEqual(cookie_options["same_site"], "lax")
+
+    def test_sessao_prod_e_restaurada_e_revogada_por_hash(self) -> None:
+        chave = Fernet.generate_key()
+        fernet = Fernet(chave)
+        session_id = "b" * 43
+        registro = {
+            "access_token_encrypted": fernet.encrypt(
+                b"access-token"
+            ).decode("ascii"),
+            "refresh_token_encrypted": fernet.encrypt(
+                b"refresh-token"
+            ).decode("ascii"),
+        }
+        chamadas: list[tuple[str, dict[str, str]]] = []
+
+        class _Rpc:
+            def __init__(self, nome: str, parametros: dict[str, str]) -> None:
+                self.nome = nome
+                self.parametros = parametros
+
+            def execute(self) -> SimpleNamespace:
+                chamadas.append((self.nome, self.parametros))
+                return SimpleNamespace(data=[registro])
+
+        cliente = SimpleNamespace(
+            rpc=lambda nome, parametros: _Rpc(nome, parametros)
+        )
+        cookies = _CookieManagerFake()
+        session_state: dict[str, object] = {}
+
+        with (
+            patch("autenticacao.st.session_state", session_state),
+            patch(
+                "autenticacao.st.context",
+                SimpleNamespace(
+                    cookies={_COOKIE_SESSAO_PROD: session_id}
+                ),
+            ),
+            patch(
+                "autenticacao.obter_configuracao",
+                return_value=chave.decode("ascii"),
+            ),
+            patch("autenticacao._configuracao", return_value="production"),
+            patch(
+                "autenticacao._credenciais_supabase",
+                return_value=("https://example.supabase.co", "anon-key"),
+            ),
+            patch("autenticacao.create_client", return_value=cliente),
+        ):
+            sessao = _restaurar_sessao_persistente(cliente, cookies)
+            _revogar_sessao_prod(session_id)
+
+        self.assertEqual(sessao, ("access-token", "refresh-token"))
+        self.assertEqual(session_state[_CHAVE_ID_SESSAO_PROD], session_id)
+        self.assertEqual(
+            chamadas,
+            [
+                (
+                    "restore_auth_session",
+                    {"target_session_hash": _hash_id_sessao_prod(session_id)},
+                ),
+                (
+                    "revoke_auth_session",
+                    {"target_session_hash": _hash_id_sessao_prod(session_id)},
+                ),
+            ],
+        )
+
+    def test_refresh_atualiza_tokens_cifrados_da_sessao_existente(self) -> None:
+        chave = Fernet.generate_key()
+        fernet = Fernet(chave)
+        session_id = "d" * 43
+        cookies = _CookieManagerFake()
+        cookies.values[_COOKIE_SESSAO_PROD] = session_id
+        dados_atualizados: dict[str, str] = {}
+        filtros: dict[str, str] = {}
+
+        class _Query:
+            def update(self, dados: dict[str, str]) -> "_Query":
+                dados_atualizados.update(dados)
+                return self
+
+            def eq(self, coluna: str, valor: str) -> "_Query":
+                filtros[coluna] = valor
+                return self
+
+            def select(self, colunas: str) -> "_Query":
+                del colunas
+                return self
+
+            def execute(self) -> SimpleNamespace:
+                return SimpleNamespace(
+                    data=[{"session_hash": filtros["session_hash"]}]
+                )
+
+        cliente = SimpleNamespace(table=lambda _: _Query())
+        session_state: dict[str, object] = {
+            _CHAVE_ID_SESSAO_PROD: session_id,
+        }
+        with (
+            patch("autenticacao.st.session_state", session_state),
+            patch("autenticacao._cookie_seguro", return_value=True),
+            patch(
+                "autenticacao.obter_configuracao",
+                return_value=chave.decode("ascii"),
+            ),
+        ):
+            _persistir_sessao_prod(
+                cookies,
+                cliente,
+                "new-access-token",
+                "new-refresh-token",
+                "user-id",
+            )
+
+        self.assertEqual(
+            filtros,
+            {
+                "session_hash": _hash_id_sessao_prod(session_id),
+                "user_id": "user-id",
+            },
+        )
+        self.assertNotIn("expires_at", dados_atualizados)
+        self.assertEqual(
+            fernet.decrypt(
+                dados_atualizados["access_token_encrypted"].encode("ascii")
+            ).decode("utf-8"),
+            "new-access-token",
+        )
+        self.assertEqual(
+            fernet.decrypt(
+                dados_atualizados["refresh_token_encrypted"].encode("ascii")
+            ).decode("utf-8"),
+            "new-refresh-token",
+        )
+        self.assertIsNone(cookies.last_set)
+
+    def test_logout_revoga_sessao_prod_e_remove_cookie(self) -> None:
+        session_id = "c" * 43
+        cookies = _CookieManagerFake()
+        cookies.values[_COOKIE_SESSAO_PROD] = session_id
+        chamadas: list[tuple[str, dict[str, str]]] = []
+
+        class _Rpc:
+            def __init__(self, nome: str, parametros: dict[str, str]) -> None:
+                self.nome = nome
+                self.parametros = parametros
+
+            def execute(self) -> SimpleNamespace:
+                chamadas.append((self.nome, self.parametros))
+                return SimpleNamespace(data=None)
+
+        cliente = SimpleNamespace(
+            rpc=lambda nome, parametros: _Rpc(nome, parametros)
+        )
+        session_state: dict[str, object] = {
+            _CHAVE_ID_SESSAO_PROD: session_id,
+            "_mi_auth_cookie_manager": cookies,
+            "_mi_supabase_access_token": "access",
+        }
+        with (
+            patch("autenticacao.st.session_state", session_state),
+            patch("autenticacao._configuracao", return_value="production"),
+            patch(
+                "autenticacao._credenciais_supabase",
+                return_value=("https://example.supabase.co", "anon-key"),
+            ),
+            patch("autenticacao.create_client", return_value=cliente),
+        ):
+            _limpar_sessao()
+
+        self.assertEqual(
+            chamadas,
+            [
+                (
+                    "revoke_auth_session",
+                    {"target_session_hash": _hash_id_sessao_prod(session_id)},
+                )
+            ],
+        )
+        self.assertNotIn(_COOKIE_SESSAO_PROD, cookies.values)
+        self.assertNotIn("_mi_supabase_access_token", session_state)
+        self.assertNotIn(_CHAVE_ID_SESSAO_PROD, session_state)
 
     def test_cookie_legado_prod_e_removido_uma_vez_por_sessao(self) -> None:
         cookies = _CookieManagerFake()

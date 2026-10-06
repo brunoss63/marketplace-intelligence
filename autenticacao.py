@@ -1,10 +1,14 @@
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from secrets import token_urlsafe
 from urllib.parse import unquote
 
 import streamlit as st
 import extra_streamlit_components as stx
+from cryptography.fernet import Fernet, InvalidToken
 from streamlit.errors import StreamlitSecretNotFoundError
 from postgrest.exceptions import APIError
 from supabase import Client, create_client
@@ -14,6 +18,7 @@ from componentes import renderizar_painel_login
 
 
 _CHAVE_COOKIE_PROD_LIMPO = "_mi_prod_auth_cookie_cleared"
+_CHAVE_ID_SESSAO_PROD = "_mi_auth_session_id"
 _CHAVES_SESSAO = (
     "_mi_supabase_access_token",
     "_mi_supabase_refresh_token",
@@ -23,9 +28,11 @@ _CHAVES_SESSAO = (
     "_mi_supabase_client",
     "_mi_tenant_id",
     "_mi_tenant_role",
+    _CHAVE_ID_SESSAO_PROD,
     _CHAVE_COOKIE_PROD_LIMPO,
 )
 _COOKIE_SESSAO = "mi_auth_session"
+_COOKIE_SESSAO_PROD = "mi_auth_session_id"
 _COOKIE_MANAGER_SESSAO = "_mi_auth_cookie_manager"
 _DURACAO_COOKIE_SESSAO_DIAS = 30
 
@@ -132,6 +139,202 @@ def _usar_cookie_sessao(ambiente: str) -> bool:
     return ambiente == "development"
 
 
+def _fernet_sessao_autenticacao() -> Fernet:
+    chave = obter_configuracao(
+        "AUTH_SESSION_ENCRYPTION_KEY",
+        preferir_secrets=True,
+    )
+    if not chave:
+        raise RuntimeError(
+            "Configure AUTH_SESSION_ENCRYPTION_KEY nos Streamlit Secrets "
+            "para habilitar sessões persistentes."
+        )
+    try:
+        return Fernet(chave.encode("ascii"))
+    except (UnicodeEncodeError, ValueError) as erro:
+        raise RuntimeError(
+            "AUTH_SESSION_ENCRYPTION_KEY não é uma chave Fernet válida."
+        ) from erro
+
+
+def _hash_id_sessao_prod(session_id: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", session_id):
+        raise RuntimeError("O identificador da sessão PROD é inválido.")
+    return sha256(session_id.encode("ascii")).hexdigest()
+
+
+def _id_sessao_cookie_prod(
+    cookie_manager: stx.CookieManager,
+) -> str | None:
+    valor = st.context.cookies.get(_COOKIE_SESSAO_PROD)
+    if valor is None:
+        valor = cookie_manager.get(_COOKIE_SESSAO_PROD)
+    return valor if isinstance(valor, str) and valor else None
+
+
+def _definir_cookie_sessao_prod(
+    cookie_manager: stx.CookieManager,
+    session_id: str,
+) -> None:
+    if cookie_manager.get(_COOKIE_SESSAO_PROD) != session_id:
+        cookie_manager.set(
+            _COOKIE_SESSAO_PROD,
+            session_id,
+            key="mi_auth_session_id_set",
+            path="/",
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(days=_DURACAO_COOKIE_SESSAO_DIAS),
+            max_age=_DURACAO_COOKIE_SESSAO_DIAS * 24 * 60 * 60,
+            secure=_cookie_seguro(),
+            same_site="lax",
+        )
+
+
+def _expirar_cookie_sessao_prod(
+    cookie_manager: stx.CookieManager,
+    *,
+    existe: bool = False,
+) -> None:
+    cookie = cookie_manager.get(_COOKIE_SESSAO_PROD)
+    if cookie is not None:
+        cookie_manager.delete(
+            _COOKIE_SESSAO_PROD,
+            key="mi_auth_session_id_delete",
+        )
+    elif existe:
+        cookie_manager.set(
+            _COOKIE_SESSAO_PROD,
+            "",
+            path="/",
+            max_age=0,
+            secure=_cookie_seguro(),
+            same_site="lax",
+        )
+
+
+def _restaurar_sessao_persistente(
+    cliente: Client,
+    cookie_manager: stx.CookieManager,
+) -> tuple[str, str] | None:
+    session_id = _id_sessao_cookie_prod(cookie_manager)
+    if session_id is None:
+        return None
+    try:
+        session_hash = _hash_id_sessao_prod(session_id)
+    except RuntimeError:
+        _expirar_cookie_sessao_prod(cookie_manager, existe=True)
+        return None
+
+    resposta = cliente.rpc(
+        "restore_auth_session",
+        {"target_session_hash": session_hash},
+    ).execute()
+    registros = resposta.data or []
+    if not registros:
+        _expirar_cookie_sessao_prod(cookie_manager, existe=True)
+        return None
+    if len(registros) != 1:
+        raise RuntimeError(
+            "A restauração retornou mais de uma sessão de autenticação."
+        )
+
+    registro = registros[0]
+    token_cifrado = (
+        registro.get("access_token_encrypted"),
+        registro.get("refresh_token_encrypted"),
+    )
+    if not all(isinstance(token, str) and token for token in token_cifrado):
+        raise RuntimeError(
+            "A sessão persistida não contém credenciais criptografadas válidas."
+        )
+    fernet = _fernet_sessao_autenticacao()
+    try:
+        access_token, refresh_token = (
+            fernet.decrypt(token.encode("ascii")).decode("utf-8")
+            for token in token_cifrado
+        )
+    except (InvalidToken, UnicodeEncodeError, UnicodeDecodeError) as erro:
+        raise RuntimeError(
+            "Não foi possível descriptografar a sessão persistida. "
+            "Verifique AUTH_SESSION_ENCRYPTION_KEY."
+        ) from erro
+
+    st.session_state[_CHAVE_ID_SESSAO_PROD] = session_id
+    return access_token, refresh_token
+
+
+def _persistir_sessao_prod(
+    cookie_manager: stx.CookieManager,
+    cliente: Client,
+    access_token: str,
+    refresh_token: str,
+    user_id: str,
+) -> None:
+    fernet = _fernet_sessao_autenticacao()
+    session_id = st.session_state.get(_CHAVE_ID_SESSAO_PROD)
+    nova_sessao = not isinstance(session_id, str) or not session_id
+    if nova_sessao:
+        session_id = token_urlsafe(32)
+    session_hash = _hash_id_sessao_prod(session_id)
+    dados: dict[str, str] = {
+        "user_id": user_id,
+        "access_token_encrypted": fernet.encrypt(
+            access_token.encode("utf-8")
+        ).decode("ascii"),
+        "refresh_token_encrypted": fernet.encrypt(
+            refresh_token.encode("utf-8")
+        ).decode("ascii"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if nova_sessao:
+        dados["session_hash"] = session_hash
+        dados["expires_at"] = (
+            datetime.now(timezone.utc)
+            + timedelta(days=_DURACAO_COOKIE_SESSAO_DIAS)
+        ).isoformat()
+        resposta = (
+            cliente.table("auth_sessions")
+            .insert(dados)
+            .select("session_hash")
+            .execute()
+        )
+    else:
+        resposta = (
+            cliente.table("auth_sessions")
+            .update(dados)
+            .eq("session_hash", session_hash)
+            .eq("user_id", user_id)
+            .select("session_hash")
+            .execute()
+        )
+    if not resposta.data:
+        raise RuntimeError(
+            "Não foi possível persistir a sessão de autenticação no Supabase."
+        )
+
+    st.session_state[_CHAVE_ID_SESSAO_PROD] = session_id
+    _definir_cookie_sessao_prod(cookie_manager, session_id)
+
+
+def _revogar_sessao_prod(session_id: str) -> None:
+    session_hash = _hash_id_sessao_prod(session_id)
+    ambiente = _configuracao("MI_ENV")
+    if ambiente != "production":
+        return
+    url, chave_anonima = _credenciais_supabase(ambiente)
+    if not url or not chave_anonima:
+        raise RuntimeError(
+            "Não foi possível revogar a sessão: credenciais Supabase "
+            "PROD indisponíveis."
+        )
+    cliente = create_client(url, chave_anonima)
+    cliente.rpc(
+        "revoke_auth_session",
+        {"target_session_hash": session_hash},
+    ).execute()
+
+
 def _persistir_sessao_cookie(
     cookie_manager: stx.CookieManager,
     access_token: str,
@@ -228,11 +431,20 @@ def _preparar_cookie_sessao(
 
 def _limpar_sessao() -> None:
     cookie_manager = st.session_state.get(_COOKIE_MANAGER_SESSAO)
-    if cookie_manager is not None:
-        _remover_cookie_sessao(cookie_manager)
-    for chave in _CHAVES_SESSAO:
-        st.session_state.pop(chave, None)
-    st.session_state.pop(_COOKIE_MANAGER_SESSAO, None)
+    session_id = st.session_state.get(_CHAVE_ID_SESSAO_PROD)
+    try:
+        if isinstance(session_id, str) and session_id:
+            _revogar_sessao_prod(session_id)
+    finally:
+        if cookie_manager is not None:
+            _remover_cookie_sessao(cookie_manager)
+            _expirar_cookie_sessao_prod(
+                cookie_manager,
+                existe=isinstance(session_id, str) and bool(session_id),
+            )
+        for chave in _CHAVES_SESSAO:
+            st.session_state.pop(chave, None)
+        st.session_state.pop(_COOKIE_MANAGER_SESSAO, None)
 
 
 def obter_cliente_supabase(*, recriar: bool = False) -> Client:
@@ -362,12 +574,33 @@ def _renderizar_login(
             )
             st.session_state["_mi_supabase_user_id"] = resposta.user.id
             st.session_state["_mi_supabase_client"] = cliente
-            _persistir_sessao_cookie(
-                cookie_manager,
-                resposta.session.access_token,
-                resposta.session.refresh_token,
-                ambiente=ambiente,
-            )
+            try:
+                if ambiente == "production":
+                    _persistir_sessao_prod(
+                        cookie_manager,
+                        cliente,
+                        resposta.session.access_token,
+                        resposta.session.refresh_token,
+                        resposta.user.id,
+                    )
+                else:
+                    _persistir_sessao_cookie(
+                        cookie_manager,
+                        resposta.session.access_token,
+                        resposta.session.refresh_token,
+                        ambiente=ambiente,
+                    )
+            except APIError as erro:
+                _limpar_sessao()
+                st.error(
+                    "Não foi possível salvar a sessão no Supabase: "
+                    f"{erro.message}"
+                )
+                return
+            except RuntimeError as erro:
+                _limpar_sessao()
+                st.error(str(erro))
+                return
 
 
 def obter_role_tenant_atual() -> str:
@@ -495,6 +728,25 @@ def exigir_autenticacao() -> None:
             access_token, refresh_token = sessao_cookie
         elif valor_cookie is not None:
             _remover_cookie_sessao(cookie_manager, existe=True)
+    elif ambiente == "production" and (
+        not access_token or not refresh_token
+    ):
+        try:
+            sessao_persistida = _restaurar_sessao_persistente(
+                cliente,
+                cookie_manager,
+            )
+        except APIError as erro:
+            st.error(
+                "Não foi possível restaurar a sessão persistente do Supabase: "
+                f"{erro.message}"
+            )
+            st.stop()
+        except RuntimeError as erro:
+            st.error(str(erro))
+            st.stop()
+        if sessao_persistida is not None:
+            access_token, refresh_token = sessao_persistida
 
     if access_token and refresh_token:
         try:
@@ -531,12 +783,31 @@ def exigir_autenticacao() -> None:
                 )
                 st.session_state["_mi_supabase_user_id"] = usuario.id
                 st.session_state["_mi_supabase_client"] = cliente
-                _persistir_sessao_cookie(
-                    cookie_manager,
-                    sessao.access_token,
-                    sessao.refresh_token,
-                    ambiente=ambiente,
-                )
+                try:
+                    if ambiente == "production":
+                        _persistir_sessao_prod(
+                            cookie_manager,
+                            cliente,
+                            sessao.access_token,
+                            sessao.refresh_token,
+                            usuario.id,
+                        )
+                    else:
+                        _persistir_sessao_cookie(
+                            cookie_manager,
+                            sessao.access_token,
+                            sessao.refresh_token,
+                            ambiente=ambiente,
+                        )
+                except APIError as erro:
+                    st.error(
+                        "Não foi possível atualizar a sessão no Supabase: "
+                        f"{erro.message}"
+                    )
+                    st.stop()
+                except RuntimeError as erro:
+                    st.error(str(erro))
+                    st.stop()
                 try:
                     tenant_id, tenant_role = _carregar_vinculo_tenant(cliente)
                 except RuntimeError as erro:
