@@ -202,13 +202,17 @@ def _remover_cookie_sessao(
 def _preparar_cookie_sessao(
     cookie_manager: stx.CookieManager,
     ambiente: str,
+    *,
+    cookie_contexto: object | None,
 ) -> None:
     if _usar_cookie_sessao(ambiente):
         return
     if st.session_state.get(_CHAVE_COOKIE_PROD_LIMPO):
         return
 
-    _remover_cookie_sessao(cookie_manager, existe=True)
+    cookie_componente = cookie_manager.get(_COOKIE_SESSAO)
+    if cookie_contexto is not None or cookie_componente is not None:
+        _remover_cookie_sessao(cookie_manager, existe=True)
     st.session_state[_CHAVE_COOKIE_PROD_LIMPO] = True
 
 
@@ -458,7 +462,16 @@ def exigir_autenticacao() -> None:
     cliente = create_client(url, chave_anonima)
     cookie_manager = stx.CookieManager(key="mi-auth-cookie-manager")
     st.session_state[_COOKIE_MANAGER_SESSAO] = cookie_manager
-    _preparar_cookie_sessao(cookie_manager, ambiente)
+    cookie_contexto = (
+        None
+        if _usar_cookie_sessao(ambiente)
+        else st.context.cookies.get(_COOKIE_SESSAO)
+    )
+    _preparar_cookie_sessao(
+        cookie_manager,
+        ambiente,
+        cookie_contexto=cookie_contexto,
+    )
     access_token = st.session_state.get("_mi_supabase_access_token")
     refresh_token = st.session_state.get("_mi_supabase_refresh_token")
     if _usar_cookie_sessao(ambiente) and (

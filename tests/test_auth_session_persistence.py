@@ -6,6 +6,7 @@ from unittest.mock import patch
 from autenticacao import (
     _COOKIE_SESSAO,
     _ler_sessao_cookie,
+    _preparar_cookie_sessao,
     _persistir_sessao_cookie,
     _usar_cookie_sessao,
 )
@@ -16,6 +17,7 @@ class _CookieManagerFake:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
         self.last_set: tuple[str, str, dict[str, object]] | None = None
+        self.delete_count = 0
 
     def get(self, cookie: str) -> str | None:
         return self.values.get(cookie)
@@ -28,6 +30,11 @@ class _CookieManagerFake:
     ) -> None:
         self.values[cookie] = value
         self.last_set = (cookie, value, options)
+
+    def delete(self, cookie: str, **options: object) -> None:
+        del options
+        self.delete_count += 1
+        self.values.pop(cookie, None)
 
 
 class TestAuthSessionPersistence(unittest.TestCase):
@@ -95,19 +102,43 @@ class TestAuthSessionPersistence(unittest.TestCase):
         self.assertNotIn(_COOKIE_SESSAO, cookies.values)
 
     def test_cookie_legado_prod_e_removido_uma_vez_por_sessao(self) -> None:
-        codigo = """
-import streamlit as st
-from unittest.mock import Mock
-from autenticacao import _preparar_cookie_sessao
+        cookies = _CookieManagerFake()
+        cookies.values[_COOKIE_SESSAO] = "sessao-legada"
+        session_state: dict[str, object] = {}
+        with patch("autenticacao.st.session_state", session_state):
+            _preparar_cookie_sessao(
+                cookies,
+                "production",
+                cookie_contexto="sessao-legada",
+            )
+            _preparar_cookie_sessao(
+                cookies,
+                "production",
+                cookie_contexto="sessao-legada",
+            )
 
-cookies = Mock()
-_preparar_cookie_sessao(cookies, "production")
-_preparar_cookie_sessao(cookies, "production")
-assert cookies.delete.call_count == 1
-assert st.session_state["_mi_prod_auth_cookie_cleared"] is True
-"""
-        app = AppTest.from_string(codigo).run(timeout=20)
-        self.assertFalse(app.exception)
+        self.assertEqual(cookies.delete_count, 1)
+        self.assertNotIn(_COOKIE_SESSAO, cookies.values)
+        self.assertIs(
+            session_state["_mi_prod_auth_cookie_cleared"],
+            True,
+        )
+
+    def test_cookie_legado_prod_ausente_nao_e_apagado(self) -> None:
+        cookies = _CookieManagerFake()
+        session_state: dict[str, object] = {}
+        with patch("autenticacao.st.session_state", session_state):
+            _preparar_cookie_sessao(
+                cookies,
+                "production",
+                cookie_contexto=None,
+            )
+
+        self.assertEqual(cookies.delete_count, 0)
+        self.assertIs(
+            session_state["_mi_prod_auth_cookie_cleared"],
+            True,
+        )
 
     def test_logout_remove_o_cookie_e_a_sessao_streamlit(self) -> None:
         codigo = """
