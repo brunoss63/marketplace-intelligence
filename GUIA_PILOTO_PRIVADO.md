@@ -40,15 +40,20 @@ via Auth API e pela interface Streamlit. O app está rodando somente em
 trabalhar contra o DEV; `production` no arquivo local causou a falha de login
 da conta B e foi corrigido.
 
-Para manter o login após atualizar a página no Streamlit, a sessão Supabase é
-persistida por até 30 dias em um cookie do navegador. Em cada atualização, o
-cookie é lido do contexto da requisição inicial do Streamlit (sem depender do
-carregamento assíncrono do componente visual) e a sessão é revalidada com o
-Supabase. Em HTTPS o cookie usa `Secure` e `SameSite=Lax`. O componente de
-cookies do Streamlit não permite marcar o cookie como `HttpOnly`; portanto, o
-token pode ser lido por JavaScript executado na origem do aplicativo. Essa
-abordagem é adequada apenas ao piloto confiável e não substitui uma sessão
-server-side para produção comercial.
+No deploy DEV, a sessão Supabase continua persistida por até 30 dias em um
+cookie do navegador para facilitar os testes do piloto. Em HTTPS o cookie usa
+`Secure` e `SameSite=Lax`, mas não `HttpOnly`; portanto, JavaScript executado na
+origem do aplicativo pode ler os tokens. Não use essa persistência do DEV com
+dados comerciais.
+
+No deploy PROD, os tokens não são gravados em cookie: permanecem somente na
+`st.session_state` server-side durante a sessão ativa do Streamlit. Um cookie
+legado de sessão é removido e nunca é usado para restaurar a autenticação.
+Como a sessão está vinculada à conexão do Streamlit, recarregar a página ou
+reconectar pode exigir novo login. Essa escolha evita expor os tokens em
+JavaScript e mantém o deploy gratuito, mas não cria um cookie `HttpOnly`
+persistente nem substitui um backend próprio se a persistência entre sessões
+for necessária.
 
 O app também foi publicado para validação no Streamlit Community Cloud em
 `https://marketplace-intelligence-dev.streamlit.app/`, ligado somente ao

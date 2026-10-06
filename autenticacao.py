@@ -13,6 +13,7 @@ from supabase_auth.errors import AuthApiError
 from componentes import renderizar_painel_login
 
 
+_CHAVE_COOKIE_PROD_LIMPO = "_mi_prod_auth_cookie_cleared"
 _CHAVES_SESSAO = (
     "_mi_supabase_access_token",
     "_mi_supabase_refresh_token",
@@ -22,6 +23,7 @@ _CHAVES_SESSAO = (
     "_mi_supabase_client",
     "_mi_tenant_id",
     "_mi_tenant_role",
+    _CHAVE_COOKIE_PROD_LIMPO,
 )
 _COOKIE_SESSAO = "mi_auth_session"
 _COOKIE_MANAGER_SESSAO = "_mi_auth_cookie_manager"
@@ -126,11 +128,20 @@ def _credenciais_supabase(ambiente: str) -> tuple[str | None, str | None]:
     return url, chave_anonima
 
 
+def _usar_cookie_sessao(ambiente: str) -> bool:
+    return ambiente == "development"
+
+
 def _persistir_sessao_cookie(
     cookie_manager: stx.CookieManager,
     access_token: str,
     refresh_token: str,
+    *,
+    ambiente: str,
 ) -> None:
+    if not _usar_cookie_sessao(ambiente):
+        return
+
     valor = json.dumps(
         {
             "access_token": access_token,
@@ -188,6 +199,19 @@ def _remover_cookie_sessao(
         cookie_manager.delete(_COOKIE_SESSAO, key="mi_auth_session_delete")
 
 
+def _preparar_cookie_sessao(
+    cookie_manager: stx.CookieManager,
+    ambiente: str,
+) -> None:
+    if _usar_cookie_sessao(ambiente):
+        return
+    if st.session_state.get(_CHAVE_COOKIE_PROD_LIMPO):
+        return
+
+    _remover_cookie_sessao(cookie_manager, existe=True)
+    st.session_state[_CHAVE_COOKIE_PROD_LIMPO] = True
+
+
 def _limpar_sessao() -> None:
     cookie_manager = st.session_state.get(_COOKIE_MANAGER_SESSAO)
     if cookie_manager is not None:
@@ -242,6 +266,7 @@ def obter_cliente_supabase(*, recriar: bool = False) -> Client:
 def _renderizar_login(
     cliente: Client,
     cookie_manager: stx.CookieManager,
+    ambiente: str,
 ) -> None:
     st.markdown('<div class="mi-login-layout"></div>', unsafe_allow_html=True)
     painel, formulario = st.columns([1.05, .95], gap="large")
@@ -327,6 +352,7 @@ def _renderizar_login(
                 cookie_manager,
                 resposta.session.access_token,
                 resposta.session.refresh_token,
+                ambiente=ambiente,
             )
 
 
@@ -432,9 +458,12 @@ def exigir_autenticacao() -> None:
     cliente = create_client(url, chave_anonima)
     cookie_manager = stx.CookieManager(key="mi-auth-cookie-manager")
     st.session_state[_COOKIE_MANAGER_SESSAO] = cookie_manager
+    _preparar_cookie_sessao(cookie_manager, ambiente)
     access_token = st.session_state.get("_mi_supabase_access_token")
     refresh_token = st.session_state.get("_mi_supabase_refresh_token")
-    if not access_token or not refresh_token:
+    if _usar_cookie_sessao(ambiente) and (
+        not access_token or not refresh_token
+    ):
         valor_cookie = st.context.cookies.get(_COOKIE_SESSAO)
         if valor_cookie is None:
             valor_cookie = cookie_manager.get(_COOKIE_SESSAO)
@@ -483,6 +512,7 @@ def exigir_autenticacao() -> None:
                     cookie_manager,
                     sessao.access_token,
                     sessao.refresh_token,
+                    ambiente=ambiente,
                 )
                 try:
                     tenant_id, tenant_role = _carregar_vinculo_tenant(cliente)
@@ -500,5 +530,5 @@ def exigir_autenticacao() -> None:
                 return
             _limpar_sessao()
 
-    _renderizar_login(cliente, cookie_manager)
+    _renderizar_login(cliente, cookie_manager, ambiente)
     st.stop()
