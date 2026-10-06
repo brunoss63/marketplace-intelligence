@@ -653,7 +653,11 @@ def _renovar_tokens(
                 "rotação segura no banco. Reautorize a conta antes de "
                 "continuar."
             )
+        st.session_state.pop("_mi_ml_connection_attention", None)
         return str(tokens["access_token"])
+    except (APIError, RuntimeError):
+        st.session_state["_mi_ml_connection_attention"] = True
+        raise
     finally:
         _liberar_lock_refresh(lease_id)
 
@@ -669,7 +673,11 @@ def obter_access_token_mercadolivre() -> str:
         raise RuntimeError("Nenhuma conta do Mercado Livre está conectada.")
     if _expira_em(conexao) <= _agora_utc() + _ANTECEDENCIA_REFRESH:
         return _renovar_tokens(conexao, tenant_id)
-    return _descriptografar(str(conexao["access_token_encrypted"]))
+    try:
+        return _descriptografar(str(conexao["access_token_encrypted"]))
+    except RuntimeError:
+        st.session_state["_mi_ml_connection_attention"] = True
+        raise
 
 
 def _validar_conexao() -> str:
@@ -766,180 +774,267 @@ def status_integracao_mercadolivre() -> str:
 
 
 def mostrar_conexao_mercadolivre() -> None:
+    from componentes import badge_html
+    from status_conexoes import obter_status_conexoes, texto_ultima_sincronizacao
+
+    status_ml, _ = obter_status_conexoes()
     if not is_database_mode():
+        st.info("A conexão com o Mercado Livre não está disponível neste ambiente.")
         return
 
-    st.subheader("Conexão com o Mercado Livre")
-    st.caption(status_integracao_mercadolivre())
     try:
         _obter_configuracao_ml()
         conexao = _obter_conexao()
-    except (APIError, RuntimeError) as erro:
-        mensagem = erro.message if isinstance(erro, APIError) else str(erro)
-        st.info(mensagem)
+    except (APIError, RuntimeError):
+        st.error("Não foi possível carregar a conexão com o Mercado Livre.")
         return
 
+    st.markdown(
+        '<div class="mi-connection-manager-row">'
+        '<strong>Mercado Livre</strong>'
+        f'{badge_html(status_ml.rotulo, _variante_badge_status(status_ml.estado))}'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    for mensagem, nivel in st.session_state.pop(
+        "_mi_ml_sync_messages",
+        [],
+    ):
+        getattr(st, nivel)(mensagem)
+    ultima_sincronizacao = texto_ultima_sincronizacao(
+        status_ml.ultima_sincronizacao
+    )
+    if ultima_sincronizacao:
+        st.caption(ultima_sincronizacao)
+
     if conexao is None:
-        st.caption(
-            "Conecte sua conta para habilitar a leitura de dados pelo "
-            "Mercado Livre. A autorização é feita no site oficial."
-        )
+        st.caption("Conecte sua conta para sincronizar os dados.")
         if st.button(
-            "Iniciar conexão com Mercado Livre",
+            "Conectar Mercado Livre",
             key="mi_ml_start_connection",
+            type="primary",
+            icon=":material/link:",
         ):
             try:
                 st.session_state[_CHAVE_URL_AUTORIZACAO] = (
                     iniciar_conexao_mercadolivre()
                 )
             except (APIError, RuntimeError) as erro:
-                mensagem = (
-                    erro.message if isinstance(erro, APIError) else str(erro)
-                )
-                st.error(mensagem)
+                mensagem = erro.message if isinstance(erro, APIError) else str(erro)
+                st.error(f"Não foi possível iniciar a conexão: {mensagem}")
         url_autorizacao = st.session_state.get(_CHAVE_URL_AUTORIZACAO)
         if isinstance(url_autorizacao, str) and url_autorizacao:
             st.link_button(
                 "Autorizar no Mercado Livre",
                 url_autorizacao,
-                type="primary",
+                type="secondary",
+                icon=":material/open_in_new:",
             )
         return
 
-    st.success(
-        "Conta conectada — identificador Mercado Livre: "
-        f"{conexao['external_user_id']}."
-    )
-    expiracao = _expira_em(conexao)
-    st.caption(
-        "Token de acesso expira em "
-        f"{expiracao.astimezone().strftime('%d/%m/%Y %H:%M %Z')}. "
-        "A renovação será feita antes de uma chamada à API."
-    )
+    with st.expander("Ver detalhes", icon=":material/info:"):
+        st.caption(f"ID da conta: {conexao.get('external_user_id', '—')}")
+        try:
+            expiracao = _expira_em(conexao)
+        except RuntimeError:
+            st.caption("Validade do token: indisponível")
+        else:
+            st.caption(
+                "Validade do token: "
+                f"{expiracao.astimezone().strftime('%d/%m/%Y %H:%M %Z')}"
+            )
 
-    with st.expander("Sincronizar dados do Mercado Livre"):
-        st.caption(
-            "A sincronização é manual. Pedidos usam o período escolhido; "
-            "produtos e estoque leem as publicações ativas. Custos de produto, "
-            "taxas e frete não são fornecidos por estas leituras e continuam "
-            "dependendo da importação manual. Registros antigos ou de "
-            "publicações inativas não são removidos automaticamente."
+    data_padrao = date.today()
+    col_inicio, col_fim = st.columns(2, gap="medium")
+    with col_inicio:
+        st.date_input(
+            "Pedidos desde",
+            value=data_padrao - timedelta(days=30),
+            key="mi_ml_sync_start",
+            format="DD/MM/YYYY",
         )
-        hoje = date.today()
-        coluna_inicio, coluna_fim = st.columns(2)
-        with coluna_inicio:
-            data_inicio_sync = st.date_input(
-                "Pedidos desde",
-                value=hoje - timedelta(days=30),
-                key="mi_ml_sync_start",
-                format="DD/MM/YYYY",
-            )
-        with coluna_fim:
-            data_fim_sync = st.date_input(
-                "Pedidos até",
-                value=hoje,
-                key="mi_ml_sync_end",
-                format="DD/MM/YYYY",
-            )
+    with col_fim:
+        st.date_input(
+            "Pedidos até",
+            value=data_padrao,
+            key="mi_ml_sync_end",
+            format="DD/MM/YYYY",
+        )
 
-        coluna_pedidos, coluna_produtos = st.columns(2)
-        with coluna_pedidos:
+    if st.button(
+        "Sincronizar",
+        key="mi_ml_sync_all",
+        type="primary",
+        icon=":material/sync:",
+        on_click=_agendar_sincronizacao_mercadolivre,
+    ):
+        pass
+
+    _processar_sincronizacao_agendada(conexao)
+
+    if st.button(
+        "Validar conexão",
+        key="mi_ml_validate_connection",
+        type="secondary",
+        icon=":material/verified_user:",
+    ):
+        try:
+            _validar_conexao()
+        except (APIError, RuntimeError) as erro:
+            mensagem = erro.message if isinstance(erro, APIError) else str(erro)
+            if "HTTP 401" in mensagem or "HTTP 403" in mensagem:
+                st.session_state["_mi_ml_connection_attention"] = True
+            st.error(f"Não foi possível validar a conexão: {mensagem}")
+        else:
+            st.session_state.pop("_mi_ml_connection_attention", None)
+            st.success("Conexão validada com sucesso.")
+
+    st.markdown('<div class="mi-connection-danger-separator"></div>',
+                unsafe_allow_html=True)
+    if st.button(
+        "Remover conexão",
+        key="mi_ml_remove_connection",
+        type="tertiary",
+        icon=":material/link_off:",
+    ):
+        st.session_state["_mi_ml_remove_confirmation"] = True
+
+    if st.session_state.get("_mi_ml_remove_confirmation", False):
+        st.warning(
+            "A remoção apaga do tenant as credenciais criptografadas do "
+            "Mercado Livre. Os dados já importados permanecem, e a autorização "
+            "no site do Mercado Livre não é revogada."
+        )
+        confirmar, cancelar = st.columns(2)
+        with confirmar:
             if st.button(
-                "Sincronizar pedidos",
-                key="mi_ml_sync_orders",
-            ):
-                if data_inicio_sync > data_fim_sync:
-                    st.error(
-                        "A data inicial não pode ser posterior à data final."
-                    )
-                else:
-                    try:
-                        with st.spinner("Lendo pedidos do Mercado Livre..."):
-                            resultado = sincronizar_pedidos(
-                                obter_access_token_mercadolivre(),
-                                str(conexao["external_user_id"]),
-                                data_inicio_sync,
-                                data_fim_sync,
-                            )
-                    except (APIError, RuntimeError) as erro:
-                        mensagem = (
-                            erro.message
-                            if isinstance(erro, APIError)
-                            else str(erro)
-                        )
-                        st.error(
-                            "Não foi possível sincronizar os pedidos: "
-                            f"{mensagem}"
-                        )
-                    else:
-                        st.success(
-                            f"Pedidos sincronizados: {resultado['total']} "
-                            f"linhas ({resultado['inseridos']} novas, "
-                            f"{resultado['atualizados']} atualizadas)."
-                        )
-        with coluna_produtos:
-            if st.button(
-                "Sincronizar produtos e estoque",
-                key="mi_ml_sync_products",
+                "Tem certeza? Remover",
+                key="mi_ml_confirm_remove_connection",
+                type="secondary",
             ):
                 try:
-                    with st.spinner(
-                        "Lendo produtos e estoque do Mercado Livre..."
-                    ):
-                        resultado = sincronizar_produtos_e_estoque(
-                            obter_access_token_mercadolivre(),
-                            str(conexao["external_user_id"]),
-                        )
-                except (APIError, RuntimeError) as erro:
-                    mensagem = (
-                        erro.message if isinstance(erro, APIError) else str(erro)
-                    )
+                    _remover_conexao()
+                except APIError as erro:
                     st.error(
-                        "Não foi possível sincronizar produtos e estoque: "
-                        f"{mensagem}"
+                        "Não foi possível remover a conexão do tenant: "
+                        f"{erro.message}"
                     )
                 else:
-                    produtos = resultado["produtos"]
-                    estoque = resultado["estoque"]
-                    st.success(
-                        "Produtos e estoque sincronizados: "
-                        f"{produtos['total']} produtos "
-                        f"({produtos['inseridos']} novos, "
-                        f"{produtos['atualizados']} atualizados); "
-                        f"{estoque['total']} saldos."
-                    )
+                    st.session_state.pop("_mi_ml_remove_confirmation", None)
+                    st.session_state.pop("_mi_ml_connection_attention", None)
+                    st.session_state.pop("_mi_ml_last_sync", None)
+                    st.success("Credenciais removidas do tenant.")
+                    st.rerun()
+        with cancelar:
+            if st.button(
+                "Cancelar",
+                key="mi_ml_cancel_remove_connection",
+                type="tertiary",
+            ):
+                st.session_state.pop("_mi_ml_remove_confirmation", None)
+                st.rerun()
 
-    coluna_validar, coluna_remover = st.columns(2)
-    with coluna_validar:
-        if st.button(
-            "Validar conexão",
-            key="mi_ml_validate_connection",
-        ):
+
+def _agendar_sincronizacao_mercadolivre() -> None:
+    st.session_state["_mi_ml_sync_pending"] = {
+        "data_inicio": st.session_state.get("mi_ml_sync_start"),
+        "data_fim": st.session_state.get("mi_ml_sync_end"),
+    }
+    st.session_state["_mi_ml_syncing"] = True
+
+
+def _variante_badge_status(estado: str) -> str:
+    return {
+        "connected": "success",
+        "syncing": "info",
+        "attention": "warning",
+        "error": "error",
+        "disconnected": "negative",
+        "coming_soon": "neutral",
+    }[estado]
+
+
+def _processar_sincronizacao_agendada(
+    conexao: dict[str, Any],
+) -> None:
+    agendamento = st.session_state.pop("_mi_ml_sync_pending", None)
+    if not isinstance(agendamento, dict):
+        return
+
+    data_inicio = agendamento.get("data_inicio")
+    data_fim = agendamento.get("data_fim")
+    if not isinstance(data_inicio, date) or not isinstance(data_fim, date):
+        st.session_state.pop("_mi_ml_syncing", None)
+        st.error("Selecione um intervalo de datas válido.")
+        return
+    if data_inicio > data_fim:
+        st.session_state.pop("_mi_ml_syncing", None)
+        st.error("A data inicial não pode ser posterior à data final.")
+        return
+
+    teve_sucesso = False
+    mensagens: list[tuple[str, str]] = []
+    try:
+        with st.status("Sincronizando dados do Mercado Livre...", expanded=True) as estado:
             try:
-                conta_id = _validar_conexao()
+                resultado_pedidos = sincronizar_pedidos(
+                    obter_access_token_mercadolivre(),
+                    str(conexao["external_user_id"]),
+                    data_inicio,
+                    data_fim,
+                )
             except (APIError, RuntimeError) as erro:
                 mensagem = erro.message if isinstance(erro, APIError) else str(erro)
-                st.error(mensagem)
+                mensagens.append((
+                    f"Não foi possível sincronizar pedidos: {mensagem}",
+                    "error",
+                ))
             else:
-                st.success(
-                    f"Conexão válida para a conta Mercado Livre {conta_id}."
-                )
-    with coluna_remover:
-        if st.button(
-            "Remover conexão deste painel",
-            key="mi_ml_remove_connection",
-        ):
+                teve_sucesso = True
+                mensagens.append((
+                    f"Pedidos sincronizados: {resultado_pedidos['total']} "
+                    f"linhas ({resultado_pedidos['inseridos']} novas, "
+                    f"{resultado_pedidos['atualizados']} atualizadas).",
+                    "success",
+                ))
+
+            estado.update(label="Sincronizando produtos e estoque...")
             try:
-                _remover_conexao()
-            except APIError as erro:
-                st.error(
-                    "Não foi possível remover a conexão do tenant: "
-                    f"{erro.message}"
+                resultado_catalogo = sincronizar_produtos_e_estoque(
+                    obter_access_token_mercadolivre(),
+                    str(conexao["external_user_id"]),
                 )
+            except (APIError, RuntimeError) as erro:
+                mensagem = erro.message if isinstance(erro, APIError) else str(erro)
+                mensagens.append((
+                    "Não foi possível sincronizar produtos e estoque: "
+                    f"{mensagem}",
+                    "error",
+                ))
             else:
-                st.success(
-                    "Credenciais removidas do tenant. Para revogar a "
-                    "autorização no Mercado Livre, faça isso também nas "
-                    "configurações da sua conta."
-                )
-                st.rerun()
+                teve_sucesso = True
+                produtos = resultado_catalogo["produtos"]
+                estoque = resultado_catalogo["estoque"]
+                mensagens.append((
+                    f"Produtos sincronizados: {produtos['total']} "
+                    f"({produtos['inseridos']} novos, "
+                    f"{produtos['atualizados']} atualizados); "
+                    f"{estoque['total']} saldos de estoque.",
+                    "success",
+                ))
+            estado.update(
+                label=(
+                    "Sincronização concluída."
+                    if teve_sucesso
+                    else "Não foi possível concluir a sincronização."
+                ),
+                state="complete" if teve_sucesso else "error",
+                expanded=False,
+            )
+    finally:
+        st.session_state.pop("_mi_ml_syncing", None)
+
+    if teve_sucesso:
+        st.session_state["_mi_ml_last_sync"] = datetime.now(timezone.utc)
+    st.session_state["_mi_ml_sync_messages"] = mensagens
+    st.rerun()

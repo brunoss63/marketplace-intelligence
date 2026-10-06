@@ -267,6 +267,7 @@ def _salvar_importacao(
     marketplace = str(estado["marketplace"])
     nome_arquivo = _arquivo_origem_label(estado)
     merge = mesclar_importacao_dashboard(tipo_dado, registros_validos)
+    st.session_state["_mi_overview_loaded"] = False
     data_hora = datetime.now().astimezone().isoformat(timespec="seconds")
     resultado: dict[str, object] = {
         "data_hora": data_hora,
@@ -664,11 +665,37 @@ def _botao_voltar(estado: dict[str, object], etapa: int) -> None:
         _avancar(estado, etapa - 1)
 
 
+def _intervalo_datas_importacao(
+    tabela: pd.DataFrame,
+) -> str | None:
+    colunas_data = (
+        "data",
+        "data_pedido",
+        "data_venda",
+        "data_criacao",
+        "created_at",
+        "order_date",
+    )
+    coluna = next(
+        (nome for nome in colunas_data if nome in tabela.columns),
+        None,
+    )
+    if coluna is None:
+        return None
+
+    datas = pd.to_datetime(tabela[coluna], errors="coerce").dropna()
+    if datas.empty:
+        return None
+    return (
+        f"{datas.min().strftime('%d/%m/%Y')} → "
+        f"{datas.max().strftime('%d/%m/%Y')}"
+    )
+
+
 animar_pagina("importar_dados")
 cabecalho_pagina(
-    "Importação de Dados",
-    "Transforme arquivos CSV ou XLSX do marketplace em tabelas internas "
-    "padronizadas.",
+    "Importar dados",
+    "Adicione dados da sua operação ao Marketplace Intelligence.",
     "⇧",
 )
 
@@ -687,7 +714,7 @@ with st.container(border=True):
     if etapa_atual == 1:
         st.caption("Informe de onde vêm os dados e qual tabela será importada.")
         marketplace = st.selectbox(
-            "Marketplace",
+            "Fonte",
             MARKETPLACES,
             index=MARKETPLACES.index(
                 estado.get("marketplace", MARKETPLACES[0])
@@ -729,13 +756,13 @@ with st.container(border=True):
 
     elif etapa_atual == 2:
         st.caption(
-            f"Envie um ou mais arquivos de {estado.get('tipo_dado', 'dados')} "
-            f"do marketplace {estado.get('marketplace', '')}. Nesta operação, "
-            "todos os arquivos devem ser desse tipo; cada arquivo precisa "
-            "conter os campos obrigatórios."
+            f"Arraste um ou mais arquivos de "
+            f"{estado.get('tipo_dado', 'dados')} da fonte "
+            f"{estado.get('marketplace', '')} ou selecione-os no computador. "
+            "CSV ou XLSX, até 20 MB por arquivo."
         )
         arquivos = st.file_uploader(
-            "Arquivos de origem",
+            "Arraste seu arquivo ou selecione no computador",
             type=["csv", "xlsx"],
             max_upload_size=20,
             key="importacao_upload",
@@ -891,6 +918,17 @@ with st.container(border=True):
             metricas[1].metric("Válidos", f"{int(validos.sum()):,}")
             metricas[2].metric("Com problemas", f"{int(invalidos.sum()):,}")
             if invalidos.any():
+                periodo_validado = _intervalo_datas_importacao(normalizado)
+                detalhe_periodo = (
+                    f" · {periodo_validado}"
+                    if periodo_validado
+                    else ""
+                )
+                total_validos = f"{int(validos.sum()):,}".replace(",", ".")
+                st.success(
+                    f"{total_validos} registros válidos encontrados"
+                    f"{detalhe_periodo}."
+                )
                 st.warning(
                     "Registros com problemas serão ignorados se você "
                     "confirmar a importação parcial na etapa de revisão."
@@ -903,11 +941,20 @@ with st.container(border=True):
                     hide_index=True,
                 )
             else:
+                periodo_validado = _intervalo_datas_importacao(normalizado)
+                detalhe_periodo = (
+                    f" · {periodo_validado}"
+                    if periodo_validado
+                    else ""
+                )
+                total_registros = f"{len(normalizado):,}".replace(",", ".")
                 st.success(
-                    "Validação concluída: todos os registros podem ser importados."
+                    "Arquivo validado — "
+                    f"{total_registros} registros encontrados"
+                    f"{detalhe_periodo}."
                 )
             if validos.any() and st.button(
-                "Continuar para revisão",
+                "Ver dados",
                 type="primary",
             ):
                 _avancar(estado, 5)
@@ -999,7 +1046,7 @@ with st.container(border=True):
                     "e não poderá ser duplicado."
                 )
             elif st.button(
-                "Importar registros válidos",
+                "Importar dados",
                 type="primary",
                 disabled=not validos.any(),
             ):

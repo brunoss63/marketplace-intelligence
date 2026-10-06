@@ -3,13 +3,54 @@ from html import escape
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from componentes import grafico_dashboard, tabela_limpa
+import plotly.graph_objects as go
+from componentes import (
+    LinhaParticipacaoCanal,
+    PALETA_DADOS,
+    PALETA_MARKETPLACES,
+    formatar_moeda_br,
+    formatar_multiplicador_br,
+    formatar_percentual_br,
+    grafico_dashboard,
+    icone_svg,
+    proxima_animacao_entrada_pagina,
+    renderizar_card_participacao_canal,
+    tabela_limpa,
+    titulo_secao,
+)
 from armazenamento import ler_dataset
 
 
-def mostrar_marketplace():
+def _marcar_comparacoes_por_produto(
+    tabela_canais: pd.DataFrame,
+) -> pd.DataFrame:
+    tabela = tabela_canais.copy()
+    tabela["tem_comparacao"] = (
+        tabela["pedidos_mercado livre"].gt(0)
+        & tabela["pedidos_shopee"].gt(0)
+    )
+    tabela["melhor_canal"] = tabela.apply(
+        lambda linha: (
+            (
+                "Mercado Livre"
+                if linha["margem_mercado livre"]
+                >= linha["margem_shopee"]
+                else "Shopee"
+            )
+            if linha["tem_comparacao"]
+            else "Sem comparação"
+        ),
+        axis=1,
+    )
+    tabela["diferença_margem"] = (
+        tabela["margem_mercado livre"]
+        - tabela["margem_shopee"]
+    ).abs()
+    tabela.loc[~tabela["tem_comparacao"], "diferença_margem"] = pd.NA
+    return tabela
 
-    st.divider()
+
+def mostrar_marketplace(*, skeleton_slot=None):
 
     # ============================================================
     # FILTRO GLOBAL
@@ -25,6 +66,8 @@ def mostrar_marketplace():
         marketplace_selecionado = None
 
     if data_inicio is None or data_fim is None:
+        if skeleton_slot is not None:
+            skeleton_slot.empty()
 
         st.warning(
             "Selecione um período na barra lateral."
@@ -40,6 +83,8 @@ def mostrar_marketplace():
     pedidos = ler_dataset("dados/pedidos.csv")
     produtos = ler_dataset("dados/produtos.csv")
     publicidade = ler_dataset("dados/publicidade.csv")
+    if skeleton_slot is not None:
+        skeleton_slot.empty()
 
     if "desconto" not in pedidos.columns:
         pedidos["desconto"] = 0.0
@@ -245,17 +290,25 @@ def mostrar_marketplace():
         .mul(100)
         .fillna(0)
     )
+
+    canais_com_vendas = dados.loc[dados["tem_vendas"], "marketplace"].tolist()
+    if not canais_com_vendas:
+        st.info("Não há vendas concluídas para comparar no período selecionado.")
+        return
+
     comparativo = dados.set_index("marketplace")
 
     metricas = [
         ("Faturamento bruto", "faturamento", "currency", False),
         ("Faturamento líquido", "faturamento_liquido", "currency", False),
         ("Descontos", "descontos", "currency", True),
+        ("Taxas", "taxas", "currency", True),
+        ("Taxa %", "taxa_percentual", "percent", True),
+        ("Resultado das vendas", "resultado_vendas", "currency", False),
+        ("Margem das vendas", "margem", "percent", False),
         ("Pedidos", "pedidos", "integer", False),
         ("Unidades", "unidades", "integer", False),
         ("Ticket médio", "ticket_medio", "currency", False),
-        ("Resultado das vendas", "resultado_vendas", "currency", False),
-        ("Margem das vendas", "margem", "percent", False),
         (
             "Investimento em publicidade",
             "investimento_publicidade",
@@ -263,22 +316,13 @@ def mostrar_marketplace():
             None
         ),
         ("ROAS", "roas", "number", False),
-        ("Taxas", "taxas", "currency", True),
-        ("Taxa %", "taxa_percentual", "percent", True)
     ]
-
-    def moeda_br(valor: float) -> str:
-        return (
-            f"R$ {valor:,.2f}"
-            .replace(",", "X")
-            .replace(".", ",")
-            .replace("X", ".")
-        )
 
     publicidade_metricas = {
         "investimento_publicidade",
         "roas",
     }
+    tem_comparacao_canais = len(canais_com_vendas) > 1
     tabela_comparativa = []
     for titulo, coluna, formato, menor_melhor in metricas:
         mercado_livre = comparativo.loc["Mercado Livre", coluna]
@@ -308,13 +352,13 @@ def mostrar_marketplace():
 
         def formatar_valor(valor: float, disponivel: bool) -> str:
             if not disponivel or pd.isna(valor):
-                return "Sem dados"
+                return "—"
             if formato == "currency":
-                return moeda_br(valor)
+                return formatar_moeda_br(valor)
             if formato == "percent":
-                return f"{valor:.1f}%"
+                return formatar_percentual_br(valor)
             if formato == "number":
-                return f"{valor:.2f}x"
+                return formatar_multiplicador_br(valor)
             if formato == "integer":
                 return f"{valor:,.0f}".replace(",", ".")
             return f"{valor:.2f}"
@@ -322,65 +366,164 @@ def mostrar_marketplace():
         valor_ml = formatar_valor(mercado_livre, ml_disponivel)
         valor_shopee = formatar_valor(shopee, shopee_disponivel)
 
-        if not ml_disponivel or not shopee_disponivel:
-            lider_texto = "Dados insuficientes"
-        elif menor_melhor is None:
-            lider_texto = "Informativo"
-        elif mercado_livre == shopee:
-            lider = "Empate"
-            lider_texto = lider
-        elif (mercado_livre < shopee) == menor_melhor:
-            lider = "Mercado Livre"
-            lider_texto = lider
-        else:
-            lider = "Shopee"
-            lider_texto = lider
-        if menor_melhor and lider_texto not in {"Empate", "Informativo"}:
-            lider_texto = f"{lider_texto} (menor)"
+        linha_comparativa = {
+            "Indicador": titulo,
+            "Mercado Livre": valor_ml,
+            "Shopee": valor_shopee,
+        }
+        if tem_comparacao_canais:
+            if not ml_disponivel or not shopee_disponivel:
+                lider_texto = "—"
+            elif menor_melhor is None:
+                lider_texto = "Informativo"
+            elif mercado_livre == shopee:
+                lider_texto = "Empate"
+            else:
+                lider = (
+                    "Mercado Livre"
+                    if (mercado_livre < shopee) == menor_melhor
+                    else "Shopee"
+                )
+                lider_texto = (
+                    f"{lider} (menor)" if menor_melhor else lider
+                )
+            linha_comparativa["Líder"] = lider_texto
+        tabela_comparativa.append(linha_comparativa)
 
-        tabela_comparativa.append(
-            {
-                "Indicador": titulo,
-                "Mercado Livre": valor_ml,
-                "Shopee": valor_shopee,
-                "Líder": lider_texto
-            }
-        )
+    mercado_livre_tem_vendas = bool(
+        comparativo.loc["Mercado Livre", "tem_vendas"]
+    )
+    shopee_tem_vendas = bool(comparativo.loc["Shopee", "tem_vendas"])
+    shopee_em_breve = not shopee_tem_vendas
+    if not tem_comparacao_canais:
+        for linha in tabela_comparativa:
+            if not mercado_livre_tem_vendas:
+                linha["Mercado Livre"] = "—"
+            if not shopee_tem_vendas:
+                linha["Shopee"] = "—"
 
+    tabela_comparativa_df = pd.DataFrame(tabela_comparativa)
+    titulo_secao(
+        "Comparativo de indicadores",
+        "Valores dos marketplaces no período selecionado.",
+    )
+    classe_entrada, atraso_entrada = proxima_animacao_entrada_pagina()
     with st.container(border=True):
-        st.markdown(
-            """
-            <div class="mi-chart-heading mi-dashboard-panel">
-                <div class="mi-chart-title">📊 Comparativo de indicadores</div>
-                <div class="mi-chart-subtitle">
-                    Valores e liderança de cada métrica no período selecionado
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        if classe_entrada:
+            st.markdown(
+                '<span class="mi-marketplace-table-entering" '
+                f'style="--mi-entry-delay:{atraso_entrada}ms"></span>',
+                unsafe_allow_html=True,
+            )
         tabela_limpa(
-            pd.DataFrame(tabela_comparativa),
+            tabela_comparativa_df,
             badges={
-                "Mercado Livre": {"Sem dados": "muted"},
-                "Shopee": {"Sem dados": "muted"},
                 "Líder": {
                     "Mercado Livre": "ml",
                     "Mercado Livre (menor)": "ml",
                     "Shopee": "shopee",
                     "Shopee (menor)": "shopee",
                     "Empate": "tie",
-                    "Dados insuficientes": "muted",
                     "Informativo": "muted",
                 }
             },
             chave="comparativo_marketplaces",
-            linhas_por_pagina=len(tabela_comparativa)
+            linhas_por_pagina=len(tabela_comparativa),
+            colunas_discretas=("Shopee",) if shopee_em_breve else (),
+            badges_cabecalho=(
+                {"Shopee": ("Em breve", "muted")}
+                if shopee_em_breve
+                else {}
+            ),
+            grupos_linhas={
+                "Faturamento bruto": "Financeiro",
+                "Pedidos": "Operacional",
+            },
+            pontos_cabecalho=("Mercado Livre",),
+            largura_maxima_px=820,
+            largura_minima_px=560,
+            borda_externa=False,
         )
-        st.caption(
-            "“Sem dados” indica que não há pedidos concluídos ou relatório "
-            "de publicidade para aquele marketplace no período selecionado."
-        )
+        if not tem_comparacao_canais:
+            marketplace_ausente = (
+                "Shopee" if mercado_livre_tem_vendas else "Mercado Livre"
+            )
+            st.markdown(
+                '<div class="mi-marketplace-invite">'
+                f'{icone_svg("chart-pie", tamanho=16)}'
+                f'Conecte a {escape(marketplace_ausente)} para comparar canais.'
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+    titulo_secao(
+        "Participação por canal",
+        "Distribuição de faturamento, pedidos e unidades no período selecionado.",
+    )
+    metricas_participacao = (
+        ("Faturamento", "faturamento", "currency"),
+        ("Pedidos", "pedidos", "integer"),
+        ("Unidades", "unidades", "integer"),
+    )
+    colunas_participacao = st.columns(3, gap="small")
+    for coluna_card, (titulo, chave_metrica, formato) in zip(
+        colunas_participacao,
+        metricas_participacao,
+    ):
+        valores_canais = [
+            (
+                marketplace,
+                float(comparativo.loc[marketplace, chave_metrica]),
+            )
+            for marketplace in canais_com_vendas
+        ]
+        valores_canais.sort(key=lambda item: item[1], reverse=True)
+        total_metrica = sum(valor for _, valor in valores_canais)
+        linhas_participacao = []
+        for indice, (marketplace, valor) in enumerate(valores_canais):
+            if formato == "currency":
+                valor_formatado = formatar_moeda_br(valor)
+            else:
+                valor_formatado = f"{valor:,.0f}".replace(",", ".")
+            participacao = (
+                valor / total_metrica * 100
+                if total_metrica > 0
+                else 0.0
+            )
+            linhas_participacao.append(
+                LinhaParticipacaoCanal(
+                    marketplace=marketplace,
+                    valor=valor_formatado,
+                    participacao=participacao,
+                    cor=PALETA_MARKETPLACES.get(
+                        marketplace,
+                        PALETA_DADOS[indice % len(PALETA_DADOS)],
+                    ),
+                    lider=(indice == 0 and len(valores_canais) > 1),
+                )
+            )
+        if (
+            len(canais_com_vendas) == 1
+            and canais_com_vendas[0] == "Mercado Livre"
+        ):
+            linhas_participacao.append(
+                LinhaParticipacaoCanal(
+                    marketplace="Shopee",
+                    valor="—",
+                    participacao=None,
+                    cor=PALETA_MARKETPLACES["Shopee"],
+                    em_breve=True,
+                )
+            )
+        with coluna_card:
+            renderizar_card_participacao_canal(
+                titulo,
+                linhas_participacao,
+                compacto=True,
+            )
+
+    if not tem_comparacao_canais:
+        return
 
     # ============================================================
     # DESEMPENHO POR PRODUTO E CANAL
@@ -484,101 +627,88 @@ def mostrar_marketplace():
         tabela_canais[colunas_numericas].fillna(0)
     )
 
-    tabela_canais["melhor_canal"] = tabela_canais.apply(
-        lambda linha: (
-            "Mercado Livre"
-            if linha["margem_mercado livre"] >= linha["margem_shopee"]
-            else "Shopee"
-        ),
-        axis=1
-    )
-    tabela_canais["diferença_margem"] = (
-        tabela_canais["margem_mercado livre"]
-        - tabela_canais["margem_shopee"]
-    ).abs()
+    tabela_canais = _marcar_comparacoes_por_produto(tabela_canais)
 
 
     # ============================================================
     # PAINEL COMPACTO DOS CANAIS
     # ============================================================
 
-    st.divider()
-    st.subheader("🏪 Comparativo visual dos canais")
-
-    col_grafico, col_participacao = st.columns(
-        [2, 1],
-        gap="medium"
+    titulo_secao(
+        "Comparativo visual dos canais",
+        "Faturamento, participação, pedidos e unidades por marketplace.",
     )
 
+    col_grafico, col_participacao = st.columns(2, gap="medium")
+
     with col_grafico:
-        grafico_faturamento = px.bar(
-            dados,
-            x="marketplace",
-            y="faturamento",
-            color="marketplace",
-            color_discrete_map={
-                "Mercado Livre": "#F5B700",
-                "Shopee": "#F4513A"
-            }
-        )
-        grafico_faturamento.update_traces(
-            hovertemplate=(
-                "<b>%{x}</b><br>"
-                "Faturamento: R$ %{y:,.2f}<extra></extra>"
+        grafico_faturamento = go.Figure(
+            go.Bar(
+                x=dados["marketplace"],
+                y=dados["faturamento"],
+                marker_color=[
+                    PALETA_MARKETPLACES.get(canal, PALETA_DADOS[0])
+                    for canal in dados["marketplace"]
+                ],
+                customdata=[
+                    [formatar_moeda_br(valor)]
+                    for valor in dados["faturamento"]
+                ],
+                hovertemplate=(
+                    "<b>%{x}</b><br>"
+                    "Faturamento: %{customdata[0]}<extra></extra>"
+                ),
             )
         )
         grafico_faturamento.update_layout(
-            height=190,
-            template="plotly_dark",
+            height=300,
             showlegend=False,
-            xaxis_title="",
-            yaxis_title="",
-            transition={"duration": 500, "easing": "cubic-in-out"},
-            margin=dict(l=20, r=20, t=8, b=12)
+            bargap=0.58,
+            barcornerradius=4,
+            margin=dict(l=24, r=20, t=8, b=26)
         )
         grafico_dashboard(
             grafico_faturamento,
-            titulo="Faturamento por Canal",
-            subtitulo="Comparação de faturamento entre os marketplaces"
+            altura=300,
+            titulo="Faturamento por canal",
+            subtitulo="Receita bruta no período selecionado",
+            eixo_y_moeda=True,
         )
 
     with col_participacao:
-        grafico_resultado = px.pie(
-            dados,
-            names="marketplace",
-            values="faturamento",
-            hole=0.68,
-            color="marketplace",
-            color_discrete_map={
-                "Mercado Livre": "#F5B700",
-                "Shopee": "#F4513A"
-            }
-        )
-        grafico_resultado.update_traces(
-            textinfo="percent",
-            hovertemplate=(
-                "<b>%{label}</b><br>"
-                "Faturamento: R$ %{value:,.2f}<br>"
-                "Participação: %{percent}<extra></extra>"
+        grafico_resultado = go.Figure(
+            go.Pie(
+                labels=dados["marketplace"],
+                values=dados["faturamento"],
+                hole=0.68,
+                marker_colors=[
+                    PALETA_MARKETPLACES.get(canal, PALETA_DADOS[0])
+                    for canal in dados["marketplace"]
+                ],
+                customdata=[
+                    formatar_moeda_br(valor)
+                    for valor in dados["faturamento"]
+                ],
+                textinfo="percent",
+                hovertemplate=(
+                    "<b>%{label}</b><br>"
+                    "Faturamento: %{customdata}<br>"
+                    "Participação: %{percent}<extra></extra>"
+                ),
             )
         )
         grafico_resultado.update_layout(
-            height=170,
-            template="plotly_dark",
+            height=300,
             showlegend=False,
-            transition={"duration": 500, "easing": "cubic-in-out"},
-            margin=dict(l=8, r=8, t=4, b=4)
+            margin=dict(l=22, r=22, t=12, b=12)
         )
         grafico_resultado.update_traces(
-            domain={"x": [0.08, 0.92], "y": [0.04, 0.96]}
+            domain={"x": [0.12, 0.88], "y": [0.08, 0.92]}
         )
         itens_legenda = []
         for _, linha in dados.iterrows():
             canal = str(linha["marketplace"])
-            cor = {
-                "Mercado Livre": "#F5B700",
-                "Shopee": "#F4513A"
-            }.get(canal, "#A8B6C9")
+            cor = PALETA_MARKETPLACES.get(canal, PALETA_DADOS[2])
             itens_legenda.append(
                 '<span style="display:inline-flex;align-items:center;'
                 'gap:5px;">'
@@ -591,21 +721,22 @@ def mostrar_marketplace():
             '<div style="display:flex;justify-content:center;'
             'align-items:center;gap:12px;flex-wrap:wrap;'
             'margin:-2px 0 2px;color:#A8B6C9;'
-            'font-size:9px;line-height:1.3;">'
+            'font-size:12px;line-height:1.3;">'
             f"{legenda_participacao}</div>"
         )
         grafico_dashboard(
             grafico_resultado,
-            titulo="Participação no Faturamento",
-            subtitulo="Divisão do faturamento entre os canais",
+            altura=300,
+            titulo="Participação no faturamento",
+            subtitulo="Divisão da receita por canal",
             rodape_html=legenda_participacao_html
         )
 
     col_unidades, col_pedidos = st.columns(2, gap="medium")
 
     for coluna, titulo, campo, rotulo in [
-        (col_unidades, "📦 Unidades por canal", "unidades", "Unidades"),
-        (col_pedidos, "🛒 Pedidos por canal", "pedidos", "Pedidos")
+        (col_unidades, "Unidades por canal", "unidades", "Unidades"),
+        (col_pedidos, "Pedidos por canal", "pedidos", "Pedidos")
     ]:
         with coluna:
             grafico = px.bar(
@@ -613,27 +744,24 @@ def mostrar_marketplace():
                 x="marketplace",
                 y=campo,
                 color="marketplace",
-                color_discrete_map={
-                    "Mercado Livre": "#F5B700",
-                    "Shopee": "#F4513A"
-                }
+                color_discrete_map=PALETA_MARKETPLACES
             )
             grafico.update_traces(
                 hovertemplate=(
                     "<b>%{x}</b><br>"
-                    f"{rotulo}: %{{y}}<extra></extra>"
+                    f"{rotulo}: %{{y:.0f}}<extra></extra>"
                 )
             )
             grafico.update_layout(
-                height=165,
-                template="plotly_dark",
+                height=260,
                 showlegend=False,
-                xaxis_title="",
-                yaxis_title="",
-                margin=dict(l=20, r=20, t=8, b=12)
+                bargap=0.58,
+                barcornerradius=4,
+                margin=dict(l=24, r=20, t=8, b=26)
             )
             grafico_dashboard(
                 grafico,
+                altura=260,
                 titulo=titulo,
                 subtitulo=f"Comparação de {rotulo.lower()} entre canais"
             )
@@ -642,63 +770,58 @@ def mostrar_marketplace():
     # MELHOR CANAL POR PRODUTO
     # ============================================================
 
-    tabela = tabela_canais[
-        [
-            "produto",
-            "melhor_canal",
-            "margem_mercado livre",
-            "margem_shopee",
-            "diferença_margem",
-            "faturamento_mercado livre",
-            "faturamento_shopee"
+    if tabela_canais["tem_comparacao"].any():
+        tabela = tabela_canais[
+            [
+                "produto",
+                "melhor_canal",
+                "margem_mercado livre",
+                "margem_shopee",
+                "diferença_margem",
+                "faturamento_mercado livre",
+                "faturamento_shopee"
+            ]
+        ].copy()
+        tabela.columns = [
+            "Produto",
+            "Melhor canal",
+            "Margem Mercado Livre",
+            "Margem Shopee",
+            "Diferença de margem",
+            "Faturamento Mercado Livre",
+            "Faturamento Shopee"
         ]
-    ].copy()
-    tabela.columns = [
-        "Produto",
-        "Melhor canal",
-        "Margem Mercado Livre",
-        "Margem Shopee",
-        "Diferença de margem",
-        "Faturamento Mercado Livre",
-        "Faturamento Shopee"
-    ]
-    tabela["Margem Mercado Livre"] = tabela[
-        "Margem Mercado Livre"
-    ].map(lambda valor: f"{valor:.1f}%")
-    tabela["Margem Shopee"] = tabela["Margem Shopee"].map(
-        lambda valor: f"{valor:.1f}%"
-    )
-    tabela["Diferença de margem"] = tabela[
-        "Diferença de margem"
-    ].map(lambda valor: f"{valor:.1f} p.p.")
-    tabela["Faturamento Mercado Livre"] = tabela[
-        "Faturamento Mercado Livre"
-    ].map(lambda valor: f"R$ {valor:,.0f}")
-    tabela["Faturamento Shopee"] = tabela[
-        "Faturamento Shopee"
-    ].map(lambda valor: f"R$ {valor:,.0f}")
+        tem_comparacao = tabela_canais["tem_comparacao"].to_numpy()
+        for coluna in ("Margem Mercado Livre", "Margem Shopee"):
+            tabela[coluna] = [
+                formatar_percentual_br(valor) if comparavel else "—"
+                for valor, comparavel in zip(tabela[coluna], tem_comparacao)
+            ]
+        tabela["Diferença de margem"] = [
+            f"{formatar_percentual_br(valor)} p.p."
+            if comparavel and not pd.isna(valor)
+            else "—"
+            for valor, comparavel in zip(
+                tabela["Diferença de margem"],
+                tem_comparacao,
+            )
+        ]
+        for coluna in ("Faturamento Mercado Livre", "Faturamento Shopee"):
+            tabela[coluna] = tabela[coluna].map(formatar_moeda_br)
 
-    with st.container(border=True):
-        st.markdown(
-            """
-            <div class="mi-chart-heading mi-dashboard-panel">
-                <div class="mi-chart-title">🧭 Melhor canal por produto</div>
-                <div class="mi-chart-subtitle">
-                    Margem após custo dos produtos, taxas, frete do vendedor
-                    e publicidade atribuída; resultado estimado, não é o
-                    repasse líquido recebido.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        titulo_secao(
+            "Melhor canal por produto",
+            "Margem estimada após custos, taxas, frete e publicidade.",
         )
-        tabela_limpa(
-            tabela,
-            badges={
-                "Melhor canal": {
-                    "Mercado Livre": "ml",
-                    "Shopee": "shopee"
-                }
-            },
-            chave="melhor_canal_produto"
-        )
+        with st.container(border=True):
+            tabela_limpa(
+                tabela,
+                badges={
+                    "Melhor canal": {
+                        "Mercado Livre": "ml",
+                        "Shopee": "shopee",
+                        "Sem comparação": "muted",
+                    }
+                },
+                chave="melhor_canal_produto"
+            )

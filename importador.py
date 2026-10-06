@@ -6,7 +6,11 @@ from zipfile import BadZipFile
 
 import pandas as pd
 
-from armazenamento import is_database_mode, salvar_importacao
+from armazenamento import (
+    invalidar_cache_importacao,
+    is_database_mode,
+    salvar_importacao,
+)
 
 
 class EsquemaImportacao(TypedDict):
@@ -373,6 +377,7 @@ def mesclar_importacao_dashboard(
     combinado = combinado.drop_duplicates(subset=chave, keep="last")
     combinado = combinado[colunas]
     combinado.to_csv(destino, index=False, encoding="utf-8-sig")
+    invalidar_cache_importacao()
     return {
         "inseridos": inseridos,
         "atualizados": atualizados,

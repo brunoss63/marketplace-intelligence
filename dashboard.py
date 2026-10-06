@@ -1,10 +1,12 @@
 import streamlit as st
 
-from autenticacao import exigir_autenticacao
+from autenticacao import _limpar_sessao, exigir_autenticacao
+from armazenamento import obter_cliente_supabase
 from componentes import (
-    animar_elementos_rolagem,
     aplicar_estilo,
     marca_sidebar,
+    renderizar_indicador_conexoes,
+    renderizar_perfil_sidebar,
 )
 from filtros import renderizar_filtros_globais
 from integracao_mercadolivre import (
@@ -19,7 +21,7 @@ from integracao_shopee import (
 
 st.set_page_config(
     page_title="Marketplace Intelligence",
-    page_icon="🏍️",
+    page_icon=":material/analytics:",
     layout="wide"
 )
 
@@ -30,52 +32,61 @@ capturar_callback_oauth()
 capturar_callback_oauth_shopee()
 processar_callback_oauth()
 processar_callback_shopee()
-animar_elementos_rolagem()
 
 
 paginas = [
     st.Page(
         "paginas/visao_geral.py",
         title="Visão Geral",
-        icon="🏠"
+        icon=":material/dashboard:"
     ),
     st.Page(
         "paginas/vendas_pedidos.py",
         title="Vendas & Pedidos",
-        icon="🧾"
+        icon=":material/receipt_long:"
     ),
     st.Page(
         "paginas/marketplaces.py",
         title="Marketplaces",
-        icon="🏪"
+        icon=":material/storefront:"
     ),
     st.Page(
         "paginas/produtos_estoque.py",
         title="Produtos & Estoque",
-        icon="📦"
+        icon=":material/inventory_2:"
     ),
     st.Page(
         "paginas/inteligencia.py",
         title="Inteligência",
-        icon="🧠"
+        icon=":material/insights:"
     ),
     st.Page(
         "paginas/importar_dados.py",
         title="Importar dados",
-        icon="⬆️"
+        icon=":material/upload_file:"
     ),
     st.Page(
         "paginas/administracao.py",
         title="Administração",
-        icon="🛡️"
+        icon=":material/admin_panel_settings:"
     ),
 ]
 
 
 pg = st.navigation(paginas)
-
 # Filtros compartilhados aparecem antes de cada página e persistem
 # durante a navegação multipágina.
 renderizar_filtros_globais()
+if renderizar_perfil_sidebar(
+    st.session_state.get("_mi_user_name", "Conta"),
+    st.session_state.get("_mi_supabase_email", ""),
+    st.session_state.get("_mi_tenant_role", "member"),
+):
+    obter_cliente_supabase().auth.sign_out()
+    _limpar_sessao()
+    st.rerun()
+
+with st.sidebar.container(key="mi-sidebar-footer"):
+    renderizar_indicador_conexoes(container=st)
 
 pg.run()

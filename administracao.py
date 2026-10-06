@@ -9,6 +9,7 @@ from postgrest.exceptions import APIError
 
 from autenticacao import eh_owner_tenant
 from armazenamento import obter_cliente_supabase, obter_tenant_id
+from componentes import tabela_limpa
 
 
 def _obter_usuario_id() -> str:
@@ -371,12 +372,36 @@ def mostrar_painel_administracao() -> None:
 
     st.markdown("### Membros do tenant")
     if membros:
-        tabela = pd.DataFrame(membros)
-        colunas_esperadas = ["user_id", "role", "created_at"]
-        colunas_disponiveis = [coluna for coluna in colunas_esperadas if coluna in tabela.columns]
-        if colunas_disponiveis:
-            tabela = tabela[colunas_disponiveis]
-        st.dataframe(tabela, use_container_width=True)
+        tabela_membros = pd.DataFrame({
+            "Avatar": ["U"] * len(membros),
+            "Usuário": [
+                f"Usuário {str(membro.get('user_id') or '')[:8]}"
+                for membro in membros
+            ],
+            "Perfil": [
+                "Owner" if membro.get("role") == "owner" else "Viewer"
+                for membro in membros
+            ],
+            "Status": ["Ativo"] * len(membros),
+            "Último acesso": ["—"] * len(membros),
+        })
+        tabela_limpa(
+            tabela_membros,
+            badges={
+                "Perfil": {
+                    "Owner": "info",
+                    "Viewer": "muted",
+                },
+                "Status": {
+                    "Ativo": "positive",
+                },
+            },
+            chave="membros_tenant",
+            linhas_por_pagina=10,
+        )
+        st.caption(
+            "Último acesso não é registrado pela fonte de identidade atual."
+        )
     else:
         st.write("Nenhum membro encontrado para este tenant.")
 

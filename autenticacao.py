@@ -1,21 +1,49 @@
+import json
 import os
+from datetime import datetime, timedelta, timezone
+from urllib.parse import unquote
 
 import streamlit as st
+import extra_streamlit_components as stx
 from streamlit.errors import StreamlitSecretNotFoundError
 from postgrest.exceptions import APIError
 from supabase import Client, create_client
 from supabase_auth.errors import AuthApiError
+
+from componentes import renderizar_painel_login
 
 
 _CHAVES_SESSAO = (
     "_mi_supabase_access_token",
     "_mi_supabase_refresh_token",
     "_mi_supabase_email",
+    "_mi_user_name",
     "_mi_supabase_user_id",
     "_mi_supabase_client",
     "_mi_tenant_id",
     "_mi_tenant_role",
 )
+_COOKIE_SESSAO = "mi_auth_session"
+_COOKIE_MANAGER_SESSAO = "_mi_auth_cookie_manager"
+_DURACAO_COOKIE_SESSAO_DIAS = 30
+
+
+def _nome_exibicao(usuario: object, email: str) -> str:
+    metadados = getattr(usuario, "user_metadata", None) or {}
+    if isinstance(metadados, dict):
+        for chave in ("full_name", "name", "display_name"):
+            nome = metadados.get(chave)
+            if isinstance(nome, str) and nome.strip():
+                return nome.strip()
+
+    identificador = email.split("@", 1)[0]
+    nome_local = " ".join(
+        identificador.replace(".", " ")
+        .replace("_", " ")
+        .replace("-", " ")
+        .split()
+    )
+    return nome_local.title() or "Conta"
 
 
 def _valor_segredo_streamlit(nome: str) -> str | None:
@@ -98,9 +126,75 @@ def _credenciais_supabase(ambiente: str) -> tuple[str | None, str | None]:
     return url, chave_anonima
 
 
+def _persistir_sessao_cookie(
+    cookie_manager: stx.CookieManager,
+    access_token: str,
+    refresh_token: str,
+) -> None:
+    valor = json.dumps(
+        {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        },
+        separators=(",", ":"),
+    )
+    if cookie_manager.get(_COOKIE_SESSAO) != valor:
+        cookie_manager.set(
+            _COOKIE_SESSAO,
+            valor,
+            key="mi_auth_session_set",
+            path="/",
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(days=_DURACAO_COOKIE_SESSAO_DIAS),
+            max_age=_DURACAO_COOKIE_SESSAO_DIAS * 24 * 60 * 60,
+            secure=_cookie_seguro(),
+            same_site="lax",
+        )
+
+
+def _cookie_seguro() -> bool:
+    return str(st.context.url or "").startswith("https://")
+
+
+def _ler_sessao_cookie(
+    valor: object,
+) -> tuple[str, str] | None:
+    if not isinstance(valor, str):
+        return None
+    try:
+        dados = json.loads(valor)
+    except json.JSONDecodeError:
+        try:
+            dados = json.loads(unquote(valor))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(dados, dict):
+        return None
+    access_token = dados.get("access_token")
+    refresh_token = dados.get("refresh_token")
+    if not isinstance(access_token, str) or not access_token:
+        return None
+    if not isinstance(refresh_token, str) or not refresh_token:
+        return None
+    return access_token, refresh_token
+
+
+def _remover_cookie_sessao(
+    cookie_manager: stx.CookieManager,
+    *,
+    existe: bool = False,
+) -> None:
+    if existe or cookie_manager.get(_COOKIE_SESSAO) is not None:
+        cookie_manager.delete(_COOKIE_SESSAO, key="mi_auth_session_delete")
+
+
 def _limpar_sessao() -> None:
+    cookie_manager = st.session_state.get(_COOKIE_MANAGER_SESSAO)
+    if cookie_manager is not None:
+        _remover_cookie_sessao(cookie_manager)
     for chave in _CHAVES_SESSAO:
         st.session_state.pop(chave, None)
+    st.session_state.pop(_COOKIE_MANAGER_SESSAO, None)
 
 
 def obter_cliente_supabase(*, recriar: bool = False) -> Client:
@@ -145,51 +239,95 @@ def obter_cliente_supabase(*, recriar: bool = False) -> Client:
     return cliente
 
 
-def _renderizar_login(cliente: Client) -> None:
-    st.title("Acesso privado")
-    st.caption("Entre com sua conta autorizada para acessar o painel.")
+def _renderizar_login(
+    cliente: Client,
+    cookie_manager: stx.CookieManager,
+) -> None:
+    st.markdown('<div class="mi-login-layout"></div>', unsafe_allow_html=True)
+    painel, formulario = st.columns([1.05, .95], gap="large")
 
-    with st.form("mi_login_form"):
-        email = st.text_input("E-mail", autocomplete="email").strip()
-        senha = st.text_input(
-            "Senha",
-            type="password",
-            autocomplete="current-password",
-        )
-        enviar = st.form_submit_button("Entrar", type="primary")
+    with painel:
+        renderizar_painel_login()
 
-    if not enviar:
-        return
-    if not email or not senha:
-        st.error("Informe o e-mail e a senha.")
-        return
+    with formulario:
+        with st.container(key="mi-login-card"):
+            st.markdown(
+                """
+                <div class="mi-login-card-heading">
+                    <div class="mi-login-card-kicker">SUA OPERAÇÃO, EM FOCO</div>
+                    <h2 class="mi-login-card-title">Bem-vindo de volta</h2>
+                    <p class="mi-login-card-subtitle">
+                        Entre com sua conta autorizada para acessar o painel.
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-    try:
-        resposta = cliente.auth.sign_in_with_password(
-            {"email": email, "password": senha}
-        )
-    except AuthApiError as erro:
-        st.error(
-            "O Supabase recusou a autenticação: "
-            f"{erro.message} "
-            f"(HTTP {erro.status}, código {erro.code or 'indisponível'})."
-        )
-        return
+            with st.form("mi_login_form"):
+                email = st.text_input(
+                    "E-mail",
+                    autocomplete="email",
+                    placeholder="voce@empresa.com",
+                ).strip()
+                senha = st.text_input(
+                    "Senha",
+                    type="password",
+                    autocomplete="current-password",
+                    placeholder="Sua senha",
+                )
+                enviar = st.form_submit_button(
+                    "Entrar no painel",
+                    type="primary",
+                    icon=":material/arrow_forward:",
+                )
 
-    if resposta.session is None or resposta.user is None:
-        st.error("O provedor de autenticação não retornou uma sessão válida.")
-        return
+            if not enviar:
+                return
+            if not email or not senha:
+                st.error("Informe o e-mail e a senha.")
+                return
 
-    st.session_state["_mi_supabase_access_token"] = (
-        resposta.session.access_token
-    )
-    st.session_state["_mi_supabase_refresh_token"] = (
-        resposta.session.refresh_token
-    )
-    st.session_state["_mi_supabase_email"] = resposta.user.email or email
-    st.session_state["_mi_supabase_user_id"] = resposta.user.id
-    st.session_state["_mi_supabase_client"] = cliente
-    st.rerun()
+            try:
+                with st.spinner("Autenticando sua conta..."):
+                    resposta = cliente.auth.sign_in_with_password(
+                        {"email": email, "password": senha}
+                    )
+            except AuthApiError as erro:
+                st.error(
+                    "O Supabase recusou a autenticação: "
+                    f"{erro.message} "
+                    f"(HTTP {erro.status}, código "
+                    f"{erro.code or 'indisponível'})."
+                )
+                return
+
+            if resposta.session is None or resposta.user is None:
+                st.error(
+                    "O provedor de autenticação não retornou uma sessão válida."
+                )
+                return
+
+            st.session_state["_mi_supabase_access_token"] = (
+                resposta.session.access_token
+            )
+            st.session_state["_mi_supabase_refresh_token"] = (
+                resposta.session.refresh_token
+            )
+            st.session_state["_mi_supabase_email"] = (
+                resposta.user.email or email
+            )
+            st.session_state["_mi_user_name"] = _nome_exibicao(
+                resposta.user,
+                resposta.user.email or email,
+            )
+            st.session_state["_mi_supabase_user_id"] = resposta.user.id
+            st.session_state["_mi_supabase_client"] = cliente
+            _persistir_sessao_cookie(
+                cookie_manager,
+                resposta.session.access_token,
+                resposta.session.refresh_token,
+            )
 
 
 def obter_role_tenant_atual() -> str:
@@ -292,8 +430,19 @@ def exigir_autenticacao() -> None:
         st.stop()
 
     cliente = create_client(url, chave_anonima)
+    cookie_manager = stx.CookieManager(key="mi-auth-cookie-manager")
+    st.session_state[_COOKIE_MANAGER_SESSAO] = cookie_manager
     access_token = st.session_state.get("_mi_supabase_access_token")
     refresh_token = st.session_state.get("_mi_supabase_refresh_token")
+    if not access_token or not refresh_token:
+        valor_cookie = st.context.cookies.get(_COOKIE_SESSAO)
+        if valor_cookie is None:
+            valor_cookie = cookie_manager.get(_COOKIE_SESSAO)
+        sessao_cookie = _ler_sessao_cookie(valor_cookie)
+        if sessao_cookie is not None:
+            access_token, refresh_token = sessao_cookie
+        elif valor_cookie is not None:
+            _remover_cookie_sessao(cookie_manager, existe=True)
 
     if access_token and refresh_token:
         try:
@@ -324,8 +473,17 @@ def exigir_autenticacao() -> None:
                     sessao.refresh_token
                 )
                 st.session_state["_mi_supabase_email"] = usuario.email or ""
+                st.session_state["_mi_user_name"] = _nome_exibicao(
+                    usuario,
+                    usuario.email or "",
+                )
                 st.session_state["_mi_supabase_user_id"] = usuario.id
                 st.session_state["_mi_supabase_client"] = cliente
+                _persistir_sessao_cookie(
+                    cookie_manager,
+                    sessao.access_token,
+                    sessao.refresh_token,
+                )
                 try:
                     tenant_id, tenant_role = _carregar_vinculo_tenant(cliente)
                 except RuntimeError as erro:
@@ -339,17 +497,8 @@ def exigir_autenticacao() -> None:
                     st.stop()
                 st.session_state["_mi_tenant_id"] = tenant_id
                 st.session_state["_mi_tenant_role"] = tenant_role
-                if st.sidebar.button("Sair", key="mi_logout"):
-                    cliente.auth.sign_out()
-                    _limpar_sessao()
-                    st.rerun()
-                st.sidebar.caption(
-                    f"Acesso autenticado: "
-                    f"{st.session_state['_mi_supabase_email']} "
-                    f"({tenant_role})"
-                )
                 return
             _limpar_sessao()
 
-    _renderizar_login(cliente)
+    _renderizar_login(cliente, cookie_manager)
     st.stop()

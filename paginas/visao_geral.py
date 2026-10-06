@@ -3,6 +3,7 @@ from html import escape
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 from armazenamento import ler_dataset
 from componentes import (
@@ -10,11 +11,18 @@ from componentes import (
     animar_pagina,
     grafico_dashboard,
     cabecalho_pagina,
+    PALETA_DADOS,
+    PALETA_MARKETPLACES,
+    LinhaParticipacaoCanal,
+    renderizar_card_participacao_canal,
+    renderizar_skeleton_dashboard,
+    renderizar_animacoes_entrada_pagina,
     tabela_limpa,
 )
 from dados_periodo import (
     obter_kpis_financeiros,
-    obter_periodo_anterior
+    obter_periodo_anterior,
+    obter_series_financeiras_diarias,
 )
 
 from secoes.insights import mostrar_insights
@@ -38,8 +46,22 @@ animar_pagina("visao_geral")
 cabecalho_pagina(
     "Visão Geral",
     "Panorama executivo da operação nos marketplaces.",
-    "◫"
+    "◫",
+    contexto=(
+        f"Período analisado · "
+        f"{st.session_state.get('data_inicio').strftime('%d/%m/%Y')} – "
+        f"{st.session_state.get('data_fim').strftime('%d/%m/%Y')}"
+        if st.session_state.get("data_inicio") is not None
+        and st.session_state.get("data_fim") is not None
+        else ""
+    ),
 )
+
+skeleton_slot = st.empty()
+mostrar_skeleton = not st.session_state.get("_mi_overview_loaded", False)
+if mostrar_skeleton:
+    with skeleton_slot.container():
+        renderizar_skeleton_dashboard()
 
 
 # ============================================================
@@ -78,6 +100,7 @@ if marketplace_selecionado == "Todos":
 
 if data_inicio is None or data_fim is None:
 
+    skeleton_slot.empty()
     st.warning(
         "Selecione um período na barra lateral."
     )
@@ -101,6 +124,9 @@ if marketplace_selecionado is not None:
     pedidos_periodo = pedidos_periodo[
         pedidos_periodo["marketplace"] == marketplace_selecionado
     ].copy()
+
+if pedidos_periodo.empty:
+    st.info("Nenhum pedido concluído encontrado no período selecionado.")
 
 
 # ============================================================
@@ -137,6 +163,81 @@ roas = kpis["roas"]
 investimento_publicidade = kpis["investimento_publicidade"]
 
 
+series_financeiras = obter_series_financeiras_diarias(
+    pedidos_periodo,
+    data_inicio,
+    data_fim,
+    produto_selecionado,
+    marketplace_selecionado,
+)
+pedidos_diarios = (
+    pedidos_periodo
+    .assign(data=pedidos_periodo["data"].dt.normalize())
+    .groupby("data")
+    .agg(
+        faturamento=("faturamento_bruto", "sum"),
+        pedidos=("id_pedido", "count"),
+    )
+    .reindex(
+        pd.date_range(data_inicio, data_fim, freq="D"),
+        fill_value=0,
+    )
+    .rename_axis("data")
+    .reset_index()
+)
+pedidos_periodo_anterior = pedidos_validos[
+    (pedidos_validos["data"].dt.date >= inicio_anterior)
+    & (pedidos_validos["data"].dt.date <= fim_anterior)
+].copy()
+if produto_selecionado is not None:
+    pedidos_periodo_anterior = pedidos_periodo_anterior[
+        pedidos_periodo_anterior["produto"] == produto_selecionado
+    ].copy()
+if marketplace_selecionado is not None:
+    pedidos_periodo_anterior = pedidos_periodo_anterior[
+        pedidos_periodo_anterior["marketplace"] == marketplace_selecionado
+    ].copy()
+pedidos_diarios_anterior = (
+    pedidos_periodo_anterior
+    .assign(data=pedidos_periodo_anterior["data"].dt.normalize())
+    .groupby("data")
+    .agg(
+        faturamento=("faturamento_bruto", "sum"),
+        pedidos=("id_pedido", "count"),
+    )
+    .reindex(
+        pd.date_range(inicio_anterior, fim_anterior, freq="D"),
+        fill_value=0,
+    )
+    .rename_axis("data")
+    .reset_index()
+)
+series_financeiras["bruto"] = (
+    pedidos_diarios["faturamento"].astype(float).tolist()
+)
+total_dias_anterior = (fim_anterior - inicio_anterior).days + 1
+data_minima = pedidos["data"].min()
+data_maxima = pedidos["data"].max()
+if pd.isna(data_minima) or pd.isna(data_maxima):
+    dias_anterior_cobertos = 0
+else:
+    inicio_cobertura = max(
+        pd.Timestamp(inicio_anterior),
+        data_minima.normalize(),
+    )
+    fim_cobertura = min(
+        pd.Timestamp(fim_anterior),
+        data_maxima.normalize(),
+    )
+    dias_anterior_cobertos = max(
+        (fim_cobertura - inicio_cobertura).days + 1,
+        0,
+    )
+comparacao_parcial = dias_anterior_cobertos < total_dias_anterior
+skeleton_slot.empty()
+st.session_state["_mi_overview_loaded"] = True
+
+
 def variacao_percentual(
     atual: float,
     anterior: float
@@ -154,10 +255,11 @@ def texto_variacao(
     variacao = variacao_percentual(atual, anterior)
 
     if variacao is None:
-        return "Sem base no período anterior"
+        return ""
 
-    sinal = "▲" if variacao > 0 else "▼" if variacao < 0 else "•"
-    return f"{sinal} {abs(variacao):.1f}% vs período anterior"
+    seta = "↗" if variacao > 0 else "↓" if variacao < 0 else "→"
+    valor = f"{variacao:+.1f}%".replace(".", ",")
+    return f"{seta} {valor} vs período anterior"
 
 
 def tipo_variacao(
@@ -173,125 +275,40 @@ def tipo_variacao(
     return "positive" if positivo else "negative"
 
 
-# ============================================================
-# RESUMO DA OPERAÇÃO
-# ============================================================
-
-def resumo_variacao(
-    indicador: str,
-    atual: float,
-    anterior: float,
-    maior_e_melhor: bool | None = True
-) -> tuple[str, str]:
-    variacao = variacao_percentual(atual, anterior)
-    if variacao is None:
-        return f"{indicador}: sem base no período anterior", "neutral"
-
-    if variacao == 0:
-        texto = f"{indicador} se manteve (0.0%) vs período anterior"
-    else:
-        direcao = "subiu" if variacao > 0 else "caiu"
-        texto = (
-            f"{indicador} {direcao} {abs(variacao):.1f}% "
-            "vs período anterior"
-        )
-    estilo = (
-        "neutral"
-        if maior_e_melhor is None
-        else tipo_variacao(atual, anterior, maior_e_melhor)
+comparacao_disponivel = any(
+    variacao_percentual(kpis[campo], kpis_anterior[campo]) is not None
+    for campo in (
+        "faturamento_bruto",
+        "faturamento_liquido",
+        "resultado",
+        "margem",
+        "pedidos",
+        "unidades",
+        "ticket_medio",
+        "roas",
+        "investimento_publicidade",
     )
-    return texto, estilo
-
-
-resumo_itens = [
-    resumo_variacao(
-        "Faturamento líquido",
-        faturamento_liquido,
-        kpis_anterior["faturamento_liquido"]
-    ),
-    resumo_variacao(
-        "Pedidos",
-        kpis["pedidos"],
-        kpis_anterior["pedidos"]
-    ),
-    resumo_variacao(
-        "Ticket médio",
-        ticket_medio,
-        kpis_anterior["ticket_medio"]
-    ),
-    resumo_variacao(
-        "Margem após custos e anúncios",
-        margem,
-        kpis_anterior["margem"]
-    ),
-    resumo_variacao(
-        "Investimento em anúncios",
-        investimento_publicidade,
-        kpis_anterior["investimento_publicidade"],
-        maior_e_melhor=None
-    )
-]
-
-chips_html = "".join(
-    (
-        f'<span class="mi-summary-chip {estilo}">'
-        f"{escape(texto)}</span>"
-    )
-    for texto, estilo in resumo_itens
 )
+if comparacao_parcial:
+    texto_banner = (
+        "Comparação com período anterior parcial: "
+        f"{dias_anterior_cobertos} de {total_dias_anterior} dias"
+    )
+    classe_banner = " mi-comparison-banner-partial"
+elif not comparacao_disponivel:
+    texto_banner = "Sem período anterior para comparar"
+    classe_banner = ""
+else:
+    texto_banner = ""
+    classe_banner = ""
 
-st.html(
-    f"""
-    <style>
-        .mi-operation-summary {{
-            background: #121C2B;
-            border: 1px solid #263449;
-            border-radius: 9px;
-            padding: 11px 13px 12px;
-            margin: 5px 0 12px;
-        }}
-        .mi-operation-summary-title {{
-            color: #A8B6C9;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: .07em;
-            text-transform: uppercase;
-            margin-bottom: 9px;
-        }}
-        .mi-operation-summary-list {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 7px;
-        }}
-        .mi-summary-chip {{
-            display: inline-flex;
-            align-items: center;
-            border: 1px solid #2B3B52;
-            border-radius: 5px;
-            background: #172334;
-            color: #CBD5E1;
-            padding: 6px 9px;
-            font-size: 10px;
-            line-height: 1.3;
-        }}
-        .mi-summary-chip.positive {{
-            border-color: rgba(34, 197, 94, .28);
-            color: #4ADE80;
-        }}
-        .mi-summary-chip.negative {{
-            border-color: rgba(244, 63, 94, .28);
-            color: #FB7185;
-        }}
-        .mi-summary-chip.neutral {{
-            color: #FBBF24;
-        }}
-    </style>
-    <div class="mi-operation-summary">
-        <div class="mi-operation-summary-title">Resumo da operação</div>
-        <div class="mi-operation-summary-list">{chips_html}</div>
-    </div>
-    """
-)
+if texto_banner:
+    st.markdown(
+        f'<div class="mi-comparison-banner{classe_banner}">'
+        '<span class="mi-comparison-banner-icon">i</span>'
+        f'<span>{texto_banner}</span></div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ============================================================
@@ -309,7 +326,7 @@ with col1:
     card(
         "Faturamento bruto",
         _moeda_br(faturamento),
-        "💰",
+        "chart-coins",
         texto_variacao(
             faturamento,
             kpis_anterior["faturamento_bruto"]
@@ -321,7 +338,9 @@ with col1:
         tooltip=(
             "Soma do valor bruto dos pedidos concluídos no período, "
             "antes de descontar custos."
-        )
+        ),
+        peso="principal",
+        sparkline=series_financeiras.get("bruto"),
     )
 
 
@@ -330,7 +349,7 @@ with col2:
     card(
         "Faturamento líquido",
         _moeda_br(faturamento_liquido),
-        "💵",
+        "chart-coins",
         texto_variacao(
             faturamento_liquido,
             kpis_anterior["faturamento_liquido"]
@@ -342,7 +361,9 @@ with col2:
         tooltip=(
             "Faturamento bruto menos descontos concedidos, taxas do "
             "marketplace e frete pago pelo vendedor."
-        )
+        ),
+        peso="principal",
+        sparkline=series_financeiras.get("liquido"),
     )
 
 with col3:
@@ -350,7 +371,7 @@ with col3:
     card(
         "Resultado após custos e anúncios",
         _moeda_br(resultado),
-        "📈",
+        "chart-up",
         texto_variacao(
             resultado,
             kpis_anterior["resultado"]
@@ -363,15 +384,22 @@ with col3:
             "Estimativa após descontar descontos concedidos, custo dos "
             "produtos, taxas, frete do vendedor e publicidade do faturamento "
             "bruto."
-        )
+        ),
+        peso="principal",
+        sparkline=series_financeiras.get("resultado"),
+        cor_valor=(
+            "positive" if resultado > 0
+            else "negative" if resultado < 0
+            else "neutral"
+        ),
     )
 
 with col4:
 
     card(
         "Margem após custos e anúncios",
-        f"{margem:.1f}%",
-        "📊",
+        f"{margem:.1f}%".replace(".", ","),
+        "chart-pie",
         texto_variacao(
             margem,
             kpis_anterior["margem"]
@@ -383,7 +411,14 @@ with col4:
         tooltip=(
             "Percentual da receita após descontos comerciais que resta "
             "depois de custos dos produtos, taxas, frete e publicidade."
-        )
+        ),
+        peso="principal",
+        sparkline=series_financeiras.get("margem"),
+        cor_valor=(
+            "positive" if margem > 0
+            else "negative" if margem < 0
+            else "neutral"
+        ),
     )
 
 col1, col2, col3, col4, col5 = st.columns(5, gap="small")
@@ -392,7 +427,7 @@ with col1:
     card(
         "Pedidos",
         f"{pedidos_total:,}".replace(",", "."),
-        "🛒",
+        "shopping-bag",
         texto_variacao(
             kpis["pedidos"],
             kpis_anterior["pedidos"]
@@ -401,14 +436,15 @@ with col1:
             kpis["pedidos"],
             kpis_anterior["pedidos"]
         ),
-        tooltip="Quantidade de pedidos concluídos no período selecionado."
+        tooltip="Quantidade de pedidos concluídos no período selecionado.",
+        peso="operacional",
     )
 
 with col2:
     card(
         "Unidades vendidas",
         f"{unidades:,.0f}".replace(",", "."),
-        "📦",
+        "package",
         texto_variacao(
             unidades,
             kpis_anterior["unidades"]
@@ -417,7 +453,8 @@ with col2:
             unidades,
             kpis_anterior["unidades"]
         ),
-        tooltip="Quantidade total de unidades vendidas nos pedidos concluídos."
+        tooltip="Quantidade total de unidades vendidas nos pedidos concluídos.",
+        peso="operacional",
     )
 
 with col3:
@@ -426,34 +463,36 @@ with col3:
         f"R$ {ticket_medio:,.2f}".replace(",", "X")
         .replace(".", ",")
         .replace("X", "."),
-        "🎯",
+        "target",
         texto_variacao(ticket_medio, kpis_anterior["ticket_medio"]),
         tipo_variacao(ticket_medio, kpis_anterior["ticket_medio"]),
         tooltip=(
             "Faturamento bruto dividido pela quantidade de pedidos "
             "concluídos."
-        )
+        ),
+        peso="operacional",
     )
 
 with col4:
     card(
         "ROAS Publicidade",
-        f"{roas:.2f}",
-        "📢",
+        f"{roas:.2f}".replace(".", ","),
+        "megaphone",
         texto_variacao(roas, kpis_anterior["roas"]),
         tipo_variacao(roas, kpis_anterior["roas"]),
         tooltip=(
             "Receita atribuída à publicidade dividida pelo investimento "
             "em anúncios. Ex.: 5,15 significa R$ 5,15 atribuídos por "
             "cada R$ 1,00 investido."
-        )
+        ),
+        peso="operacional",
     )
 
 with col5:
     card(
         "Investimento em anúncios",
         _moeda_br(investimento_publicidade),
-        "📣",
+        "megaphone",
         texto_variacao(
             investimento_publicidade,
             kpis_anterior["investimento_publicidade"]
@@ -463,7 +502,8 @@ with col5:
             kpis_anterior["investimento_publicidade"],
             maior_e_melhor=False
         ),
-        tooltip="Valor investido em anúncios durante o período selecionado."
+        tooltip="Valor investido em anúncios durante o período selecionado.",
+        peso="operacional",
     )
 
 # ============================================================
@@ -478,66 +518,114 @@ col_grafico, col_canais = st.columns(
 )
 
 
-pedidos_diarios = (
-    pedidos_periodo
-    .assign(data=pedidos_periodo["data"].dt.normalize())
-    .groupby("data")
-    .agg(
-        faturamento=("faturamento_bruto", "sum"),
-        pedidos=("id_pedido", "count"),
-    )
-    .reindex(
-        pd.date_range(data_inicio, data_fim, freq="D"),
-        fill_value=0,
-    )
-    .rename_axis("data")
-    .reset_index()
+valores_diarios = series_financeiras.get(
+    "bruto",
+    pedidos_diarios["faturamento"].astype(float).tolist(),
 )
-
-periodo = pedidos_diarios[["data", "faturamento"]]
+periodo = pedidos_diarios[["data"]].copy()
+periodo["faturamento"] = valores_diarios
+periodo["valor_formatado"] = periodo["faturamento"].map(_moeda_br)
 
 
 with col_grafico:
     grafico = px.line(
         periodo,
         x="data",
-        y="faturamento"
+        y="faturamento",
+        custom_data=["valor_formatado"],
     )
 
     grafico.update_traces(
-        line_color="#3B82F6",
+        name="Faturamento bruto",
+        mode="lines+markers",
+        line_color=PALETA_DADOS[0],
         hovertemplate=(
-            "Faturamento: <b>R$ %{y:,.2f}</b>"
+            "Faturamento bruto: <b>%{customdata[0]}</b>"
             "<extra></extra>"
-        )
+        ),
     )
 
-    grafico.update_xaxes(hoverformat="%d/%m/%Y")
-
-    grafico.update_layout(
-        height=270,
-        template="plotly_dark",
-        xaxis_title="",
-        yaxis_title="",
-        hovermode="x unified",
-        transition={
-            "duration": 500,
-            "easing": "cubic-in-out"
-        },
-        margin=dict(
-            l=20,
-            r=20,
-            t=20,
-            b=20
+    if comparacao_disponivel:
+        valores_anteriores = (
+            pedidos_diarios_anterior["faturamento"]
+            .astype(float)
+            .tolist()
         )
-    )
+        datas_anterior = pd.date_range(
+            inicio_anterior,
+            fim_anterior,
+            freq="D",
+        )
+        if not pd.isna(data_minima) and not pd.isna(data_maxima):
+            valores_anteriores = [
+                valor
+                if data_minima.normalize() <= data <= data_maxima.normalize()
+                else None
+                for data, valor in zip(datas_anterior, valores_anteriores)
+            ]
+        valores_anteriores = valores_anteriores[:len(periodo)]
+        grafico.add_trace(
+            go.Scatter(
+                x=periodo["data"],
+                y=valores_anteriores,
+                customdata=[
+                    [_moeda_br(valor) if valor is not None else "—"]
+                    for valor in valores_anteriores
+                ],
+                name="Período anterior",
+                mode="lines",
+                line={"color": PALETA_DADOS[2], "dash": "dot"},
+                opacity=.62,
+                meta={"mi_auxiliary": True},
+                hovertemplate=(
+                    "Período anterior: <b>%{customdata[0]}</b>"
+                    "<extra></extra>"
+                ),
+            )
+        )
 
+    media_faturamento = float(periodo["faturamento"].mean())
+    if media_faturamento > 0:
+        grafico.add_hline(
+            y=media_faturamento,
+            line_dash="dot",
+            line_color=PALETA_DADOS[2],
+            opacity=.62,
+            annotation_text=f"Média · {_moeda_br(media_faturamento)}",
+            annotation_position="right",
+            annotation_font={"size": 12, "color": PALETA_DADOS[2]},
+            annotation_bgcolor="rgba(15, 23, 42, .88)",
+            annotation_bordercolor="rgba(182, 156, 255, .22)",
+            annotation_borderpad=4,
+        )
+
+    if not periodo.empty and float(periodo["faturamento"].max()) > 0:
+        indice_pico = periodo["faturamento"].idxmax()
+        dia_pico = periodo.loc[indice_pico]
+        grafico.add_annotation(
+            x=dia_pico["data"],
+            y=float(dia_pico["faturamento"]),
+            text="Pico",
+            showarrow=True,
+            arrowhead=2,
+            ax=0,
+            ay=-27,
+            font={"size": 12, "color": PALETA_DADOS[0]},
+            bgcolor="rgba(15, 23, 42, .78)",
+            bordercolor="rgba(115, 169, 255, .24)",
+            borderpad=3,
+            yshift=4,
+        )
 
     grafico_dashboard(
         grafico,
         titulo="Evolução do Faturamento",
         subtitulo="Faturamento bruto ao longo do tempo",
-        hover_sobre_area=True
+        visual_minimal=True,
+        linha_suave=True,
+        apenas_exportar=True,
+        respiro_eixo_y=True,
+        eixo_y_moeda=True,
     )
 
 
@@ -549,92 +637,130 @@ with col_canais:
         .rename(columns={"faturamento_bruto": "faturamento"})
     )
 
-    grafico_canais = px.pie(
-        faturamento_canais,
-        names="marketplace",
-        values="faturamento",
-        hole=0.64,
-        color="marketplace",
-        color_discrete_map={
-            "Mercado Livre": "#F5B700",
-            "Shopee": "#F4513A"
-        }
-    )
-
     total_faturamento_canais = faturamento_canais[
         "faturamento"
     ].sum()
-    cores_canais = {
-        "Mercado Livre": "#F5B700",
-        "Shopee": "#F4513A"
-    }
-    linhas_legenda = []
-    for _, linha in faturamento_canais.iterrows():
+    if len(faturamento_canais) == 1:
+        linha = faturamento_canais.iloc[0]
         marketplace = str(linha["marketplace"])
         valor = float(linha["faturamento"])
         participacao = (
             valor / total_faturamento_canais * 100
             if total_faturamento_canais > 0
-            else 0
+            else 0.0
         )
-        valor_formatado = (
-            f"R$ {valor:,.2f}"
-            .replace(",", "X")
-            .replace(".", ",")
-            .replace("X", ".")
+        cor = PALETA_MARKETPLACES.get(marketplace, PALETA_DADOS[0])
+        renderizar_card_participacao_canal(
+            "Faturamento por Marketplace",
+            [
+                LinhaParticipacaoCanal(
+                    marketplace=marketplace,
+                    valor=_moeda_br(valor),
+                    participacao=participacao,
+                    cor=cor,
+                )
+            ],
         )
-        cor = cores_canais.get(marketplace, "#A8B6C9")
-        linhas_legenda.append(
-            f'<div class="mi-pie-summary-row">'
-            f'<span class="mi-pie-summary-label">'
-            f'<span class="mi-pie-summary-swatch" '
-            f'style="background:{cor}"></span>'
-            f"{escape(marketplace)}</span>"
-            f'<span><span class="mi-pie-summary-amount">'
-            f"{valor_formatado}</span>"
-            f'<span class="mi-pie-summary-share">'
-            f"({participacao:.1f}%)</span></span></div>"
+    elif len(faturamento_canais) > 1:
+        cores_canais = {
+            str(nome): PALETA_MARKETPLACES.get(
+                str(nome),
+                PALETA_DADOS[indice % len(PALETA_DADOS)],
+            )
+            for indice, nome in enumerate(faturamento_canais["marketplace"])
+        }
+        faturamento_canais["valor_formatado"] = (
+            faturamento_canais["faturamento"].map(_moeda_br)
         )
-    legenda_canais_html = (
-        '<div class="mi-pie-summary">'
-        f"{''.join(linhas_legenda)}</div>"
-    )
+        faturamento_canais["participacao_formatada"] = (
+            faturamento_canais["faturamento"]
+            .div(total_faturamento_canais)
+            .mul(100)
+            .map(lambda valor: f"{valor:.1f}%".replace(".", ","))
+            if total_faturamento_canais > 0
+            else "0,0%"
+        )
+        grafico_canais = px.pie(
+            faturamento_canais,
+            names="marketplace",
+            values="faturamento",
+            hole=0.78,
+            color="marketplace",
+            color_discrete_map=cores_canais,
+            color_discrete_sequence=list(PALETA_DADOS),
+            custom_data=["valor_formatado", "participacao_formatada"],
+        )
+        grafico_canais.update_traces(
+            textinfo="none",
+            hovertemplate=(
+                "<b>%{label}</b><br>"
+                "Faturamento: <b>%{customdata[0]}</b><br>"
+                "Participação: %{customdata[1]}<extra></extra>"
+            ),
+            sort=False,
+            marker={"line": {"color": "rgba(15, 23, 42, .8)", "width": 1}},
+        )
+        grafico_canais.update_layout(
+            height=188,
+            showlegend=False,
+            margin=dict(l=6, r=6, t=3, b=0),
+            annotations=[
+                {
+                    "text": (
+                        '<span style="font-size:10px;color:#8FA1B8">'
+                        "Total</span><br>"
+                        f'<span style="font-size:13px;color:#F1F5F9">'
+                        f"<b>{escape(_moeda_br(total_faturamento_canais))}"
+                        "</b></span>"
+                    ),
+                    "x": 0.5,
+                    "y": 0.5,
+                    "showarrow": False,
+                    "align": "center",
+                }
+            ],
+        )
+        grafico_canais.update_traces(
+            domain={"x": [0.08, 0.92], "y": [0.04, 0.96]}
+        )
 
-    grafico_canais.update_traces(
-        textinfo="none",
-        hovertemplate=(
-            "%{label}: <b>R$ %{value:,.2f}</b> "
-            "<span style='color:#A8B6C9'>(%{percent})</span>"
-            "<extra></extra>"
-        ),
-        sort=False
-    )
-
-    grafico_canais.update_layout(
-        height=210,
-        template="plotly_dark",
-        showlegend=False,
-        transition={
-            "duration": 500,
-            "easing": "cubic-in-out"
-        },
-        margin=dict(
-            l=8,
-            r=8,
-            t=8,
-            b=0
+        linhas_legenda = []
+        for _, linha in faturamento_canais.iterrows():
+            nome_canal = str(linha["marketplace"])
+            valor = float(linha["faturamento"])
+            participacao = (
+                valor / total_faturamento_canais * 100
+                if total_faturamento_canais > 0
+                else 0.0
+            )
+            participacao_formatada = (
+                f"{participacao:.1f}%".replace(".", ",")
+            )
+            cor = cores_canais[nome_canal]
+            linhas_legenda.append(
+                '<div class="mi-pie-summary-row">'
+                '<span class="mi-pie-summary-label">'
+                f'<span class="mi-pie-summary-swatch" '
+                f'style="background:{cor}"></span>'
+                f"{escape(nome_canal)}</span>"
+                '<span><span class="mi-pie-summary-amount">'
+                f"{_moeda_br(valor)}</span>"
+                '<span class="mi-pie-summary-share">'
+                f"{participacao_formatada}</span></span></div>"
+            )
+        grafico_dashboard(
+            grafico_canais,
+            titulo="Faturamento por Marketplace",
+            subtitulo="Participação por canal",
+            rodape_html=(
+                '<div class="mi-pie-summary">'
+                f"{''.join(linhas_legenda)}</div>"
+            ),
+            visual_minimal=True,
+            apenas_exportar=True,
         )
-    )
-    grafico_canais.update_traces(
-        domain={"x": [0.08, 0.92], "y": [0.02, 0.98]}
-    )
-
-    grafico_dashboard(
-        grafico_canais,
-        titulo="Faturamento por Marketplace",
-        subtitulo="Participação por canal",
-        rodape_html=legenda_canais_html
-    )
+    else:
+        st.info("Sem faturamento por marketplace neste período.")
 
 
 col_pedidos, col_resumo = st.columns(
@@ -643,30 +769,104 @@ col_pedidos, col_resumo = st.columns(
 )
 
 with col_pedidos:
+    pedidos_diarios["pedidos_formatado"] = (
+        pedidos_diarios["pedidos"].astype(int).astype(str)
+    )
     grafico_pedidos = px.area(
         pedidos_diarios,
         x="data",
-        y="pedidos"
+        y="pedidos",
+        custom_data=["pedidos_formatado"],
     )
     grafico_pedidos.update_traces(
-        line_color="#F97316",
+        name="Pedidos",
+        mode="lines+markers",
+        line_color=PALETA_DADOS[5],
         hovertemplate=(
-            "Pedidos: <b>%{y}</b><extra></extra>"
+            "Pedidos: <b>%{customdata[0]}</b><extra></extra>"
         )
     )
-    grafico_pedidos.update_xaxes(hoverformat="%d/%m/%Y")
-    grafico_pedidos.update_layout(
-        height=240,
-        template="plotly_dark",
-        xaxis_title="",
-        yaxis_title="",
-        margin=dict(l=20, r=20, t=20, b=20)
-    )
+    if comparacao_disponivel:
+        pedidos_anteriores = (
+            pedidos_diarios_anterior["pedidos"]
+            .astype(int)
+            .tolist()
+        )
+        datas_anterior = pd.date_range(
+            inicio_anterior,
+            fim_anterior,
+            freq="D",
+        )
+        if not pd.isna(data_minima) and not pd.isna(data_maxima):
+            pedidos_anteriores = [
+                valor
+                if data_minima.normalize() <= data <= data_maxima.normalize()
+                else None
+                for data, valor in zip(datas_anterior, pedidos_anteriores)
+            ]
+        pedidos_anteriores = pedidos_anteriores[:len(pedidos_diarios)]
+        grafico_pedidos.add_trace(
+            go.Scatter(
+                x=pedidos_diarios["data"],
+                y=pedidos_anteriores,
+                customdata=[
+                    [str(valor) if valor is not None else "—"]
+                    for valor in pedidos_anteriores
+                ],
+                name="Período anterior",
+                mode="lines",
+                line={"color": PALETA_DADOS[4], "dash": "dot"},
+                opacity=.55,
+                meta={"mi_auxiliary": True},
+                hovertemplate=(
+                    "Período anterior: <b>%{customdata[0]}</b> pedidos"
+                    "<extra></extra>"
+                ),
+            )
+        )
+    media_pedidos = float(pedidos_diarios["pedidos"].mean())
+    if media_pedidos > 0:
+        media_pedidos_texto = (
+            f"{media_pedidos:.1f}".replace(".", ",")
+        )
+        grafico_pedidos.add_hline(
+            y=media_pedidos,
+            line_dash="dot",
+            line_color=PALETA_DADOS[5],
+            opacity=.6,
+            annotation_text=f"Média · {media_pedidos_texto}/dia",
+            annotation_position="right",
+            annotation_font={"size": 12, "color": PALETA_DADOS[5]},
+            annotation_bgcolor="rgba(15, 23, 42, .88)",
+            annotation_bordercolor="rgba(100, 199, 230, .22)",
+            annotation_borderpad=4,
+        )
+    if not pedidos_diarios.empty and int(pedidos_diarios["pedidos"].max()) > 0:
+        indice_pico_pedidos = pedidos_diarios["pedidos"].idxmax()
+        dia_pico_pedidos = pedidos_diarios.loc[indice_pico_pedidos]
+        grafico_pedidos.add_annotation(
+            x=dia_pico_pedidos["data"],
+            y=int(dia_pico_pedidos["pedidos"]),
+            text="Pico",
+            showarrow=True,
+            arrowhead=2,
+            ax=0,
+            ay=-27,
+            font={"size": 12, "color": PALETA_DADOS[5]},
+            bgcolor="rgba(15, 23, 42, .78)",
+            bordercolor="rgba(100, 199, 230, .24)",
+            borderpad=3,
+            yshift=4,
+        )
     grafico_dashboard(
         grafico_pedidos,
         titulo="Evolução dos Pedidos",
         subtitulo="Quantidade de pedidos ao longo do tempo",
-        hover_sobre_area=True
+        visual_minimal=True,
+        linha_suave=True,
+        apenas_exportar=True,
+        respiro_eixo_y=True,
+        eixo_y_inteiro=True,
     )
 
 with col_resumo:
@@ -678,7 +878,9 @@ with col_resumo:
             ) {
                 background: #121C2B;
                 border-color: #263449;
-                border-radius: 8px;
+                border-radius: 14px;
+                min-height: 390px;
+                height: 100%;
                 box-shadow: 0 5px 16px rgba(0, 0, 0, 0.18);
                 transition:
                     transform 220ms cubic-bezier(.2, .7, .2, 1),
@@ -694,6 +896,33 @@ with col_resumo:
                     0 11px 24px rgba(0, 0, 0, 0.27),
                     0 0 17px rgba(59, 130, 246, 0.09);
             }
+            .mi-period-metrics {
+                display: flex;
+                min-height: 285px;
+                flex-direction: column;
+                justify-content: space-evenly;
+            }
+            .mi-period-metric {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 11px 2px;
+                border-bottom: 1px solid rgba(51, 65, 85, .62);
+            }
+            .mi-period-metric:last-child {
+                border-bottom: 0;
+            }
+            .mi-period-metric-label {
+                color: #A8B6C9;
+                font-size: 12px;
+            }
+            .mi-period-metric-value {
+                color: #E8EEF7;
+                font-size: 17px;
+                font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+            }
         </style>
         """,
         unsafe_allow_html=True
@@ -701,28 +930,42 @@ with col_resumo:
 
     with st.container(border=True):
         st.markdown(
-            """
+            f"""
             <div class="mi-chart-heading mi-period-summary-heading">
-                <div class="mi-chart-title">📌 Resumo do período</div>
+                <div class="mi-chart-title">Resumo do período</div>
                 <div class="mi-chart-subtitle">
                     Taxas, frete e investimento em publicidade
                 </div>
             </div>
+            <div class="mi-period-metrics">
+                <div class="mi-period-metric">
+                    <span class="mi-period-metric-label">
+                        Taxas do marketplace
+                    </span>
+                    <strong class="mi-period-metric-value">
+                        {_moeda_br(kpis["taxas"])}
+                    </strong>
+                </div>
+                <div class="mi-period-metric">
+                    <span class="mi-period-metric-label">
+                        Frete do vendedor
+                    </span>
+                    <strong class="mi-period-metric-value">
+                        {_moeda_br(kpis["frete"])}
+                    </strong>
+                </div>
+                <div class="mi-period-metric">
+                    <span class="mi-period-metric-label">
+                        Publicidade
+                    </span>
+                    <strong class="mi-period-metric-value">
+                        {_moeda_br(investimento_publicidade)}
+                    </strong>
+                </div>
+            </div>
             """,
-            unsafe_allow_html=True
-        )
-        st.metric(
-            "Taxas do marketplace",
-            _moeda_br(kpis["taxas"])
-        )
-        st.metric(
-            "Frete do vendedor",
-            _moeda_br(kpis["frete"])
-        )
-        st.metric(
-            "Publicidade",
-            _moeda_br(investimento_publicidade)
-        )
+                unsafe_allow_html=True
+            )
 
 
 # ============================================================
@@ -731,12 +974,21 @@ with col_resumo:
 
 mostrar_insights(
     periodo,
-    card
+    pedidos_periodo,
 )
 
 st.divider()
-st.markdown("### 🧾 Vendas recentes")
-st.caption("Pedidos concluídos mais recentes dentro dos filtros selecionados.")
+st.markdown(
+    """
+    <div class="mi-chart-heading">
+        <div class="mi-chart-title">Vendas recentes</div>
+        <div class="mi-chart-subtitle">
+            Pedidos concluídos mais recentes dentro dos filtros selecionados
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 if pedidos_periodo.empty:
     st.info("Não há vendas no período e nos filtros selecionados.")
 else:
@@ -765,12 +1017,16 @@ else:
             .replace("X", ".")
         )
     )
-    vendas_recentes["desconto"] = vendas_recentes["desconto"].fillna(0).map(
+    vendas_recentes["quantidade"] = (
+        pd.to_numeric(vendas_recentes["quantidade"], errors="coerce")
+        .fillna(0)
+        .map(lambda valor: str(int(valor)))
+    )
+    vendas_recentes["desconto"] = vendas_recentes["desconto"].map(
         lambda valor: (
-            f"R$ {valor:,.2f}"
-            .replace(",", "X")
-            .replace(".", ",")
-            .replace("X", ".")
+            "—"
+            if pd.isna(valor) or float(valor) == 0
+            else _moeda_br(float(valor))
         )
     )
     vendas_recentes = vendas_recentes.rename(
@@ -794,10 +1050,36 @@ else:
         },
         chave="visao_geral_vendas_recentes",
         linhas_por_pagina=10,
+        colunas_discretas=("Pedido",),
     )
 
-st.page_link(
-    "paginas/vendas_pedidos.py",
-    label="Ver todas as vendas e pedidos",
-    icon="🧾",
+st.markdown(
+    """
+    <style>
+        .st-key-mi-all-sales-link a {
+            color: #A8B6C9;
+            font-size: 12px;
+            text-decoration: none;
+            transition: color 160ms ease, transform 160ms ease;
+        }
+        .st-key-mi-all-sales-link a:hover {
+            color: #C5DEFF;
+            transform: translateX(2px);
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
+with st.container(
+    key="mi-all-sales-link",
+    horizontal=True,
+    horizontal_alignment="right",
+):
+    st.page_link(
+        "paginas/vendas_pedidos.py",
+        label="Ver todas as vendas e pedidos",
+        icon=":material/arrow_forward:",
+        width="content",
+    )
+
+renderizar_animacoes_entrada_pagina()

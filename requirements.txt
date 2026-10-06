@@ -5,3 +5,4 @@ openpyxl
 cryptography>=42,<51
 requests>=2.32,<3.0
 supabase>=2.0,<3.0
+extra-streamlit-components>=0.1.81,<0.2

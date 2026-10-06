@@ -80,6 +80,30 @@ _TAMANHO_PAGINA = 1000
 _TAMANHO_LOTE = 500
 
 
+@st.cache_data(ttl=300, max_entries=32, show_spinner=False)
+def _ler_csv_local(
+    caminho: str,
+    modificacao_ns: int,
+    tamanho: int,
+    opcoes_csv: dict[str, Any],
+) -> pd.DataFrame:
+    del modificacao_ns, tamanho
+    return pd.read_csv(caminho, **opcoes_csv)
+
+
+def limpar_cache_dataset_local() -> None:
+    _ler_csv_local.clear()
+
+
+def invalidar_cache_importacao() -> None:
+    _ler_dataset_banco.clear()
+    _ler_historico_banco.clear()
+    limpar_cache_dataset_local()
+    from dados_periodo import limpar_cache_calculos
+
+    limpar_cache_calculos()
+
+
 def is_database_mode() -> bool:
     ambiente = os.environ.get("MI_ENV")
     if not ambiente:
@@ -200,7 +224,14 @@ def ler_dataset(
     """Lê os CSVs locais na demonstração ou dados isolados por tenant no banco."""
 
     if not is_database_mode():
-        return pd.read_csv(caminho, **opcoes_csv)
+        caminho_local = Path(caminho).resolve()
+        estatuto = caminho_local.stat()
+        return _ler_csv_local(
+            str(caminho_local),
+            estatuto.st_mtime_ns,
+            estatuto.st_size,
+            opcoes_csv,
+        )
 
     dados = _ler_dataset_banco(
         obter_tenant_id(),
@@ -340,5 +371,4 @@ def salvar_lote_importacao(registro: dict[str, Any]) -> None:
 
 
 def _limpar_cache_dados() -> None:
-    _ler_dataset_banco.clear()
-    _ler_historico_banco.clear()
+    invalidar_cache_importacao()

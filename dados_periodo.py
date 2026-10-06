@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
+import streamlit as st
 
 from armazenamento import is_database_mode, ler_dataset
 
@@ -30,7 +31,27 @@ def obter_kpis_financeiros(
     produtos = ler_dataset("dados/produtos.csv")
     pedidos = ler_dataset("dados/pedidos.csv")
     publicidade = ler_dataset("dados/publicidade.csv")
+    return _calcular_kpis_financeiros(
+        pedidos,
+        produtos,
+        publicidade,
+        data_inicio,
+        data_fim,
+        produto,
+        marketplace,
+    )
 
+
+@st.cache_data(ttl=300, max_entries=128, show_spinner=False)
+def _calcular_kpis_financeiros(
+    pedidos: pd.DataFrame,
+    produtos: pd.DataFrame,
+    publicidade: pd.DataFrame,
+    data_inicio: date,
+    data_fim: date,
+    produto: str | None = None,
+    marketplace: str | None = None,
+) -> dict[str, float]:
     if "desconto" not in pedidos.columns:
         pedidos["desconto"] = 0.0
     pedidos["desconto"] = pd.to_numeric(
@@ -121,6 +142,106 @@ def obter_kpis_financeiros(
     }
 
 
+def obter_series_financeiras_diarias(
+    pedidos_periodo: pd.DataFrame,
+    data_inicio: date,
+    data_fim: date,
+    produto: str | None = None,
+    marketplace: str | None = None,
+) -> dict[str, list[float]]:
+    """Calcula séries diárias para sparklines usando os filtros do painel."""
+
+    return _calcular_series_financeiras_diarias(
+        pedidos_periodo,
+        ler_dataset("dados/produtos.csv"),
+        ler_dataset("dados/publicidade.csv"),
+        data_inicio,
+        data_fim,
+        produto,
+        marketplace,
+    )
+
+
+@st.cache_data(ttl=300, max_entries=128, show_spinner=False)
+def _calcular_series_financeiras_diarias(
+    pedidos_periodo: pd.DataFrame,
+    produtos: pd.DataFrame,
+    publicidade: pd.DataFrame,
+    data_inicio: date,
+    data_fim: date,
+    produto: str | None,
+    marketplace: str | None,
+) -> dict[str, list[float]]:
+    pedidos = pedidos_periodo.copy()
+    if pedidos.empty:
+        return {}
+    if "desconto" not in pedidos.columns:
+        pedidos["desconto"] = 0.0
+    if "data" not in pedidos:
+        return {}
+
+    pedidos["data"] = pd.to_datetime(pedidos["data"])
+    publicidade["data"] = pd.to_datetime(publicidade["data"])
+    pedidos = pedidos.merge(
+        produtos[["sku", "custo_unitario"]],
+        on="sku",
+        how="left",
+    )
+    pedidos["custo_produtos"] = (
+        pedidos["quantidade"] * pedidos["custo_unitario"]
+    )
+    financeiro = pedidos.groupby(
+        pedidos["data"].dt.normalize()
+    ).agg(
+        bruto=("faturamento_bruto", "sum"),
+        descontos=("desconto", "sum"),
+        taxas=("taxa_marketplace", "sum"),
+        frete=("frete_vendedor", "sum"),
+        custo=("custo_produtos", "sum"),
+    )
+
+    if produto is not None:
+        skus = produtos.loc[produtos["produto"] == produto, "sku"]
+        publicidade = publicidade[publicidade["sku"].isin(skus)]
+    if marketplace is not None:
+        publicidade = publicidade[
+            publicidade["marketplace"] == marketplace
+        ]
+    publicidade = publicidade[
+        (publicidade["data"].dt.date >= data_inicio)
+        & (publicidade["data"].dt.date <= data_fim)
+    ]
+    gasto_diario = publicidade.groupby(
+        publicidade["data"].dt.normalize()
+    )["investimento"].sum()
+
+    eixo = pd.date_range(data_inicio, data_fim, freq="D")
+    financeiro = financeiro.reindex(eixo, fill_value=0)
+    financeiro["publicidade"] = gasto_diario.reindex(eixo, fill_value=0)
+    financeiro["liquido"] = (
+        financeiro["bruto"]
+        - financeiro["descontos"]
+        - financeiro["taxas"]
+        - financeiro["frete"]
+    )
+    financeiro["resultado"] = (
+        financeiro["liquido"]
+        - financeiro["custo"]
+        - financeiro["publicidade"]
+    )
+    base_margem = financeiro["bruto"] - financeiro["descontos"]
+    financeiro["margem"] = (
+        financeiro["resultado"]
+        .div(base_margem.where(base_margem.ne(0)))
+        .mul(100)
+        .fillna(0)
+    )
+    return {
+        nome: financeiro[nome].astype(float).tolist()
+        for nome in ("bruto", "liquido", "resultado", "margem")
+    }
+
+
 def obter_desempenho_produtos(
     data_inicio: date,
     data_fim: date,
@@ -132,6 +253,27 @@ def obter_desempenho_produtos(
     produtos = ler_dataset("dados/produtos.csv")
     pedidos = ler_dataset("dados/pedidos.csv")
     publicidade = ler_dataset("dados/publicidade.csv")
+    return _calcular_desempenho_produtos(
+        produtos,
+        pedidos,
+        publicidade,
+        data_inicio,
+        data_fim,
+        produto,
+        marketplace,
+    )
+
+
+@st.cache_data(ttl=300, max_entries=64, show_spinner=False)
+def _calcular_desempenho_produtos(
+    produtos: pd.DataFrame,
+    pedidos: pd.DataFrame,
+    publicidade: pd.DataFrame,
+    data_inicio: date,
+    data_fim: date,
+    produto: str | None = None,
+    marketplace: str | None = None,
+) -> pd.DataFrame:
     if "desconto" not in pedidos.columns:
         pedidos["desconto"] = 0.0
     pedidos["desconto"] = pd.to_numeric(
@@ -276,6 +418,12 @@ def obter_desempenho_produtos(
     )
 
     return desempenho
+
+
+def limpar_cache_calculos() -> None:
+    _calcular_kpis_financeiros.clear()
+    _calcular_series_financeiras_diarias.clear()
+    _calcular_desempenho_produtos.clear()
 
 
 def classificar_produtos(

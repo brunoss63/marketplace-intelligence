@@ -199,7 +199,7 @@ with st.container(border=True):
     st.markdown(
         """
         <div class="mi-chart-heading mi-dashboard-panel">
-            <div class="mi-chart-title">📌 Resumo das oportunidades</div>
+            <div class="mi-chart-title">Resumo das oportunidades</div>
             <div class="mi-chart-subtitle">
                 Prioridades calculadas a partir de vendas, margem e estoque
             </div>
