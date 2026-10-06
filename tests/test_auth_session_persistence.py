@@ -140,6 +140,35 @@ class TestAuthSessionPersistence(unittest.TestCase):
             True,
         )
 
+    def test_cookie_legado_prod_contextual_sem_cache_e_expirado(self) -> None:
+        cookies = _CookieManagerFake()
+        session_state: dict[str, object] = {}
+        with (
+            patch("autenticacao.st.session_state", session_state),
+            patch("autenticacao._cookie_seguro", return_value=True),
+        ):
+            _preparar_cookie_sessao(
+                cookies,
+                "production",
+                cookie_contexto="sessao-legada",
+            )
+
+        self.assertEqual(cookies.delete_count, 0)
+        self.assertEqual(
+            cookies.last_set,
+            (
+                _COOKIE_SESSAO,
+                "",
+                {
+                    "path": "/",
+                    "max_age": 0,
+                    "secure": True,
+                    "same_site": "lax",
+                },
+            ),
+        )
+        self.assertIs(session_state["_mi_prod_auth_cookie_cleared"], True)
+
     def test_logout_remove_o_cookie_e_a_sessao_streamlit(self) -> None:
         codigo = """
 import streamlit as st

@@ -195,8 +195,18 @@ def _remover_cookie_sessao(
     *,
     existe: bool = False,
 ) -> None:
-    if existe or cookie_manager.get(_COOKIE_SESSAO) is not None:
+    cookie = cookie_manager.get(_COOKIE_SESSAO)
+    if cookie is not None:
         cookie_manager.delete(_COOKIE_SESSAO, key="mi_auth_session_delete")
+    elif existe:
+        cookie_manager.set(
+            _COOKIE_SESSAO,
+            "",
+            path="/",
+            max_age=0,
+            secure=_cookie_seguro(),
+            same_site="lax",
+        )
 
 
 def _preparar_cookie_sessao(
