@@ -216,11 +216,10 @@ Secrets esperados no deploy PROD: `MERCADOLIVRE_PROD_CLIENT_ID`,
 `MERCADOLIVRE_PROD_TOKEN_ENCRYPTION_KEY`. Gere uma chave Fernet independente;
 não reutilize a chave DEV nem grave qualquer segredo no repositório.
 
-Após revisar as opções restantes de segurança e publicar o código testado,
-guarde Client ID, Client Secret, redirect URI e chave Fernet PROD em Secrets
-do app `marketplace-intelligence-live`; não os adicione à
-`.streamlit/secrets.toml` ou ao repositório. O Client Secret não deve ser
-copiado para o chat.
+Após rotacionar o Client Secret no portal, guarde Client ID, Client Secret,
+redirect URI e chave Fernet PROD somente nos Secrets do app
+`marketplace-intelligence-live`; não os adicione à `.streamlit/secrets.toml`
+ou ao repositório. Nunca compartilhe o Client Secret no chat.
 
 #### ✅ Tarefa 2.2: Registrar aplicação Shopee em PROD
 1. Acessar https://developer.shop.shopee.br (requere aprovação)
@@ -234,10 +233,10 @@ O código seleciona credenciais e chave Fernet `MERCADOLIVRE_DEV_*` ou
 que o callback PROD seja exatamente
 `https://marketplace-intelligence-live.streamlit.app/`. Testes offline
 confirmam a seleção de secrets PROD e a rejeição de callback divergente.
-O código está preparado e validado localmente em `main-prod`, ainda não
-publicado. A aplicação foi cadastrada no portal. Falta revisar as opções
-restantes de segurança, publicar a alteração, inserir os secrets apenas no
-deploy PROD e validar o fluxo real antes de sincronizar dados.
+O código foi testado e publicado em `main-prod` no commit `7db91a2`; o deploy
+PROD voltou a apresentar a tela de login após a publicação. Ainda faltam os
+secrets próprios no deploy e a validação do OAuth real. Antes de usar o Client
+Secret exibido pelo portal durante a inspeção, faça a rotação dele no painel.
 
 ---
 
@@ -401,14 +400,17 @@ distintas; essa conta ainda não foi criada.
      teste de restauração sem interromper PROD.
 
 2. **OAuth Mercado Livre PROD cadastrado, porém ainda não habilitado**
-   - A aplicação independente existe e usa o callback HTTPS do deploy PROD;
-     código e testes locais estão prontos, mas a alteração ainda não foi
-     publicada e os quatro secrets PROD não foram configurados.
+   - A aplicação independente usa o callback HTTPS do deploy PROD; código e
+     testes estão publicados em `main-prod`. A tela de login do deploy voltou
+     a responder após a atualização, mas os quatro secrets ainda não foram
+     configurados.
    - O portal indica segurança em 70% e a aplicação não está certificada.
-     A conta foi verificada por telefone; ainda é necessário entender/revisar
-     a configuração restante antes de disponibilizar o Client Secret.
-   - Não conectar nem sincronizar uma conta até publicar o código e configurar
-     os secrets direto no app Streamlit PROD.
+     A conta foi verificada por telefone; as opções configuradas foram
+     revisadas sem ampliar permissões ou habilitar tópicos não usados.
+   - Por prudência, rotacione o Client Secret no portal antes de adicioná-lo
+     aos Secrets do Streamlit PROD. Nunca o compartilhe no chat.
+   - Não conectar nem sincronizar uma conta até configurar os quatro secrets
+     no app e validar o OAuth real.
 
 3. **Shopee em breve**
    - Status: Ainda não tem OAuth pronto
