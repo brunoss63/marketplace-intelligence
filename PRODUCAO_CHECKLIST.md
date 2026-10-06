@@ -14,13 +14,16 @@
 - Projetos Supabase `marketplace-intelligence-dev`, `Marketplace Intelligence - Piloto` e `Marketplace Intelligence - PROD`
 - App DEV e deploy PROD de validação publicados separadamente no Streamlit Community Cloud
 - Schema, RLS, e multi-tenant implementados
-- OAuth Mercado Livre (DEV)
+- Aplicações OAuth separadas para Mercado Livre DEV e PROD; a integração PROD
+  foi preparada localmente, mas ainda não publicada nem ativada por secrets.
 
 ❌ **Não existe para PRODUÇÃO:**
-- OAuth Mercado Livre em PROD (registrado apenas para DEV)
+- OAuth Mercado Livre em PROD validado (cadastro criado; credenciais, secrets e
+  teste real ainda pendentes)
 - OAuth Shopee em PROD
 - Persistência de login entre reconexões do Streamlit (PROD usa sessão server-side temporária)
-- Backup e restauração testados
+- Backup manual e restauração testados (o plano Free não inclui backup automático)
+- Validação ponta a ponta com duas contas Auth reais; o teste transacional de RLS foi concluído com uma identidade sintética não associada
 
 ---
 
@@ -97,8 +100,17 @@
   pode ser retomado por até um ano; não foi apagado.
 - Retome o Piloto quando precisar dele e planeje uma cópia/migração dos dados
   antes de qualquer ação destrutiva.
-- O projeto PROD não possui backups configurados; configure e teste a
-  restauração antes de armazenar dados reais.
+- Em 6 de outubro de 2026, o painel Database → Backups do PROD informou
+  explicitamente que o plano Free não inclui backups do projeto; a seção de
+  backups agendados está desabilitada. Não há backup automático disponível.
+- A documentação oficial recomenda que projetos Free exportem regularmente
+  usando `supabase db dump` e mantenham cópias fora do projeto. Nenhum dump foi
+  gerado: o CLI Supabase, Docker, `pg_dump` e `psql` não foram encontrados no
+  PATH deste computador e a senha de conexão do banco não foi usada.
+- A restauração manual exige um projeto de destino. Como DEV e PROD ocupam os
+  dois projetos ativos permitidos no Free, um teste de restauração exigiria
+  pausar um deles (interrupção temporária) ou mudar de plano. Não faça isso sem
+  escolher e aprovar o impacto primeiro.
 - No formulário de criação, `Automatically expose new tables` estava marcado
   por padrão; as migrations revogaram os acessos `anon` e as consultas
   confirmaram zero tabelas públicas acessíveis a `anon`.
@@ -120,7 +132,24 @@
   para `anon`.
 - [x] Definir a senha da conta owner pelo utilitário local de recuperação PROD.
 - [x] Criar o deploy PROD separado e testar o login owner nesse deploy.
-- [ ] Fazer testes de isolamento com duas contas e tenants antes de produção.
+- [x] Executar teste transacional de isolamento RLS com tenant de teste e
+  identidade sintética não associada; todas as 14 verificações passaram e os
+  fixtures foram confirmados ausentes após `ROLLBACK`.
+- [ ] Fazer validação ponta a ponta com duas contas Auth reais antes de
+  produção; a conta do cliente ainda não existe e não foi criada.
+
+**Backups no Supabase Free (6 de outubro de 2026):**
+- O painel PROD confirma que o Free não inclui backups automáticos.
+- A orientação oficial para o Free é exportar regularmente com Supabase CLI
+  (`supabase db dump`) e manter cópia fora do projeto. O procedimento oficial
+  requer CLI, Docker Desktop e connection string/senha do banco.
+- Nenhum arquivo de backup foi criado. O destino local fora do repositório foi
+  escolhido, mas o Windows negou a consulta que confirmaria a criptografia do
+  volume; por segurança, a geração foi adiada até existir um destino
+  comprovadamente criptografado. Não armazenar dumps no repositório nem nos
+  Secrets do Streamlit, e não enviar a senha pelo chat.
+- Documentação: [Backups](https://supabase.com/docs/guides/platform/backups) e
+  [Backup/Restore via CLI](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
 
 **Deploy PROD de validação (6 de outubro de 2026):**
 - [x] Criar a branch remota `main-prod` a partir do mesmo commit validado em
@@ -170,17 +199,28 @@ consumir os nomes correspondentes e as integrações forem liberadas.
 
 ### **FASE 2: OAUTH PRODUÇÃO (Dia 2-3)**
 
-#### ⏸️ Tarefa 2.1: Registrar aplicação Mercado Livre em PROD
-Faça esta etapa somente depois de implementar o suporte OAuth PROD e confirmar
-no código o callback HTTPS exato. Crie uma aplicação separada da DEV em
-https://developers.mercadolibre.com.br/pt_BR/admin/applications e configure
-como callback o domínio
-`https://marketplace-intelligence-live.streamlit.app/` com a rota exata que a
-integração implementar.
+#### ✅ Tarefa 2.1: Registrar aplicação Mercado Livre em PROD
+Em 6 de outubro de 2026, foi criada a aplicação separada `Marketplace
+Intelligence PROD`, com o callback HTTPS fixo
+`https://marketplace-intelligence-live.streamlit.app/` (raiz do app). Foram
+selecionados Authorization Code, Refresh Token e PKCE; leitura de publicações
+e vendas; sem VIS, permissões de escrita adicionais ou tópicos de notificação.
+Foi usado um ícone temporário simples com “MI”. O portal mostra configuração
+de segurança em 70% e classifica a aplicação como não certificada; a revisão
+das opções restantes foi aberta após a verificação da conta por telefone. O
+estado de segurança continua em 70%; nenhuma configuração adicional do app foi
+alterada durante a inspeção.
 
-Depois da alteração e dos testes, guarde client ID, client secret, redirect URI
-e chave Fernet PROD em Secrets do app `marketplace-intelligence-live`; não os
-adicione a `.streamlit/secrets.toml` versionado ou ao repositório.
+Secrets esperados no deploy PROD: `MERCADOLIVRE_PROD_CLIENT_ID`,
+`MERCADOLIVRE_PROD_CLIENT_SECRET`, `MERCADOLIVRE_PROD_REDIRECT_URI` e
+`MERCADOLIVRE_PROD_TOKEN_ENCRYPTION_KEY`. Gere uma chave Fernet independente;
+não reutilize a chave DEV nem grave qualquer segredo no repositório.
+
+Após revisar as opções restantes de segurança e publicar o código testado,
+guarde Client ID, Client Secret, redirect URI e chave Fernet PROD em Secrets
+do app `marketplace-intelligence-live`; não os adicione à
+`.streamlit/secrets.toml` ou ao repositório. O Client Secret não deve ser
+copiado para o chat.
 
 #### ✅ Tarefa 2.2: Registrar aplicação Shopee em PROD
 1. Acessar https://developer.shop.shopee.br (requere aprovação)
@@ -188,12 +228,16 @@ adicione a `.streamlit/secrets.toml` versionado ou ao repositório.
    - Environment: Production
    - Redirect URI: `https://SEU_DOMINIO_PROD.streamlit.app/callback-shopee`
 
-#### ⏸️ Tarefa 2.3: Implementar configuração OAuth PROD
-Atualizar `integracao_mercadolivre.py` para selecionar credenciais e chave de
-criptografia separadas por `MI_ENV`, preservar o fluxo DEV e acrescentar testes
-que confirmem a escolha dos Secrets PROD e o callback HTTPS. O código atual
-recusa explicitamente OAuth fora de `development`; não configure credenciais
-PROD até essa alteração estar pronta e validada.
+#### ✅ Tarefa 2.3: Implementar configuração OAuth PROD
+O código seleciona credenciais e chave Fernet `MERCADOLIVRE_DEV_*` ou
+`MERCADOLIVRE_PROD_*` conforme `MI_ENV`, mantém o conjunto DEV isolado e exige
+que o callback PROD seja exatamente
+`https://marketplace-intelligence-live.streamlit.app/`. Testes offline
+confirmam a seleção de secrets PROD e a rejeição de callback divergente.
+O código está preparado e validado localmente em `main-prod`, ainda não
+publicado. A aplicação foi cadastrada no portal. Falta revisar as opções
+restantes de segurança, publicar a alteração, inserir os secrets apenas no
+deploy PROD e validar o fluxo real antes de sincronizar dados.
 
 ---
 
@@ -242,15 +286,26 @@ Depois de liberada a produção:
 3. Confirme o tenant exclusivo e aprove o onboarding com papel `member`.
 4. Valide o acesso da conta do cliente antes de importar dados autorizados.
 
-#### ✅ Tarefa 4.3: Validar isolamento de dados
-```python
-# Seu tenant (bruno.ribeirods99@gmail.com):
-# - Acessa dados_bruno_prod.xlsx (fictícios)
+#### 🟡 Tarefa 4.3: Validar isolamento de dados
+- [x] No SQL Editor PROD, executar uma transação com fixtures temporários para
+  dois tenants; o owner viu o tenant A (1 linha) e não viu o tenant B (0).
+- [x] RLS bloqueou leitura do tenant de teste em produtos, conexão de
+  marketplace e transação OAuth; INSERT/UPDATE cruzados em produtos e INSERT
+  cruzado na auditoria foram negados.
+- [x] Uma identidade sintética sem membership não viu nenhum dos tenants nem
+  os fixtures e não conseguiu inserir; as tabelas administrativas e a inbox
+  de webhooks não concedem `SELECT` ao papel `authenticated`.
+- [x] As 14 verificações retornaram `passed=true`; a transação terminou com
+  `ROLLBACK`. Uma consulta posterior confirmou zero tenants, produtos,
+  conexões, transações OAuth e eventos de auditoria de teste persistidos.
+- [ ] Repetir o fluxo de leitura/importação no app com duas contas Auth reais
+  quando a conta do cliente estiver disponível; nenhuma segunda conta foi
+  criada para este teste.
 
-# Tenant do cliente (cliente@example.com):
-# - NÃO vê seus dados
-# - Pode importar e usar seus próprios dados
-```
+As policies observadas em `orders`, `inventory`, `ad_performance` e
+`import_batches` usam a mesma função `user_has_tenant_access(tenant_id)` das
+tabelas centrais; ainda assim, não houve fixture de dados nessas quatro tabelas
+durante a validação transacional.
 
 ---
 
@@ -273,21 +328,20 @@ de autenticação server-side separada.
   `mi_auth_session` ausente do navegador após a autenticação.
 
 #### ✅ Tarefa 5.2: Verificar RLS do Supabase
-```sql
--- Conectar ao Supabase PROD SQL Editor
--- Verificar policies:
-SELECT * FROM pg_policies WHERE tablename LIKE 'clients_tenants_roles%';
+No PROD, a consulta de policies confirmou as regras de isolamento por tenant
+nas tabelas públicas. O teste controlado simulou `authenticated` e
+`auth.uid()` dentro de uma transação, sem criar usuário/tenant permanente:
+- O owner consultou apenas seus fixtures do tenant A; não leu o tenant B.
+- INSERT cruzado foi rejeitado pela policy `WITH CHECK`; UPDATE cruzado afetou
+  zero linhas pela policy `USING`.
+- A auditoria rejeitou INSERT atribuído a um tenant do qual o usuário não é
+  owner.
+- A identidade sem vínculo não leu os fixtures de nenhum tenant e não inseriu.
+- Os dados temporários foram revertidos e a consulta de verificação posterior
+  encontrou zero fixtures.
 
--- Exemplo de política correta:
-CREATE POLICY "isolate_by_tenant"
-ON clients_tenants_roles
-FOR SELECT
-USING (tenant_id = (
-  SELECT tenant_id FROM clients_tenants_roles
-  WHERE user_id = auth.uid()
-  LIMIT 1
-));
-```
+O teste não substitui uma validação de ponta a ponta com duas contas Auth
+distintas; essa conta ainda não foi criada.
 
 #### ✅ Tarefa 5.3: Documentar processo de suporte
 - [ ] Como resetar senha do cliente
@@ -310,10 +364,11 @@ USING (tenant_id = (
   modo server-side sem cookie persistente.
 
 **Isolamento de dados:**
-- [ ] Bruno vê apenas seus dados fictícios
-- [ ] Cliente vê apenas seus dados
-- [ ] Não há vazamento de dados entre tenants
-- [ ] RLS está ativo (testar via SQL)
+- [x] RLS está ativo nas 12 tabelas públicas e o teste transacional acima
+  bloqueou acesso cruzado nos fixtures das tabelas exercitadas.
+- [ ] Confirmar no app que Bruno vê apenas seus dados fictícios.
+- [ ] Confirmar com uma segunda conta real que o cliente vê apenas os dados
+  do próprio tenant e nenhum dado do Bruno.
 
 **Mercado Livre OAuth:**
 - [ ] Bruno consegue conectar MercadoLivre (com app PROD)
@@ -338,14 +393,22 @@ USING (tenant_id = (
 1. **Deploy PROD validado somente com a conta owner**
    - O app usa a branch `main-prod` e secrets separados de DEV; login owner e
      acesso ao painel autenticado foram confirmados.
-   - Ainda não convide o cliente: faltam teste de isolamento entre dois
-     tenants, backup/restauração e validação das integrações PROD. O login pode
-     precisar ser repetido após refresh/reconexão do Streamlit.
+   - O teste estrutural transacional RLS passou; ainda falta a validação no app
+     com duas contas reais, backup/restauração e validação das integrações
+     PROD. O login pode precisar ser repetido após refresh/reconexão do Streamlit.
+   - O Supabase Free não fornece backup automático. Antes de dados reais,
+     definir destino protegido para o dump manual e liberar espaço para um
+     teste de restauração sem interromper PROD.
 
-2. **OAuth Mercado Livre recusa PROD**
-   - Solução: Registrar aplicação nova e implementar/testar a configuração de
-     produção; o domínio de callback deverá usar
-     `marketplace-intelligence-live.streamlit.app`.
+2. **OAuth Mercado Livre PROD cadastrado, porém ainda não habilitado**
+   - A aplicação independente existe e usa o callback HTTPS do deploy PROD;
+     código e testes locais estão prontos, mas a alteração ainda não foi
+     publicada e os quatro secrets PROD não foram configurados.
+   - O portal indica segurança em 70% e a aplicação não está certificada.
+     A conta foi verificada por telefone; ainda é necessário entender/revisar
+     a configuração restante antes de disponibilizar o Client Secret.
+   - Não conectar nem sincronizar uma conta até publicar o código e configurar
+     os secrets direto no app Streamlit PROD.
 
 3. **Shopee em breve**
    - Status: Ainda não tem OAuth pronto
@@ -359,8 +422,12 @@ USING (tenant_id = (
 
 ## 📞 PRÓXIMAS AÇÕES
 
-1. Configurar e testar backup/restauração do Supabase PROD.
-2. Liberar Mercado Livre OAuth em PROD e testar isolamento com dois tenants.
+1. Definir destino protegido e rotina do dump manual gratuito; preparar CLI e
+   Docker e gerar um backup sem expor a senha. Planejar restauração somente
+   após aprovar a pausa temporária de um projeto ativo ou outra alternativa.
+2. Concluir verificação de segurança da aplicação Mercado Livre, publicar a
+   integração PROD, configurar secrets direto no Streamlit e validar OAuth
+   antes de sincronizar.
 3. Validar convite, logout e novo login após refresh/reconexão.
 4. Só então cadastrar o cliente quando o e-mail dele estiver disponível.
 
@@ -380,6 +447,8 @@ USING (tenant_id = (
 
 ---
 
-**Estado atual:** deploy PROD de validação criado e login owner confirmado.
-O próximo marco é resolver os bloqueadores de segurança acima, não cadastrar o
-cliente ainda.
+**Estado atual:** deploy PROD de validação criado e login owner confirmado;
+teste transacional RLS concluído sem fixtures persistentes. O plano Free não
+tem backup automático; o dump manual foi adiado até confirmar armazenamento
+criptografado e a restauração ainda não foi testada. Resolva esses e os demais
+bloqueadores antes de cadastrar o cliente.

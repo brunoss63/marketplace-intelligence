@@ -109,11 +109,13 @@ Supabase.
    mensagem da interface e peça ao cliente para autorizar novamente. Não
    compartilhe tokens nem informações técnicas.
 
-**Bloqueio para produção:** atualmente o módulo do Mercado Livre recusa
-ambientes diferentes de `development`. Não basta trocar `MI_ENV` para
-`production`: antes será preciso registrar/configurar a aplicação OAuth de
-produção, callback HTTPS correspondente, secrets próprios, chave de
-criptografia separada e habilitar/testar o fluxo em produção.
+**Bloqueio para produção:** o código seleciona secrets separados para
+`development` e `production`, e valida em PROD o callback fixo
+`https://marketplace-intelligence-live.streamlit.app/`. Isso não habilita a
+conexão por si só: ainda é preciso cadastrar uma aplicação separada no Mercado
+Livre, configurar os quatro secrets `MERCADOLIVRE_PROD_*` no deploy PROD (com
+chave Fernet própria), publicar a alteração e validar o fluxo OAuth real antes
+de conectar ou sincronizar uma conta.
 
 ## Fase 4 — inserir dados e orientar o cliente
 
@@ -173,8 +175,9 @@ Não use o deploy DEV como ambiente comercial. Prepare e valide separadamente:
   somente na `st.session_state` server-side durante a sessão ativa.
 - [ ] Validar o comportamento de logout, expiração e novo login após refresh ou
   reconexão do Streamlit.
-- [ ] Aplicação OAuth de produção do Mercado Livre e callback HTTPS; atualizar
-  a integração, que hoje bloqueia produção.
+- [ ] Registrar a aplicação OAuth de produção do Mercado Livre com o callback
+  HTTPS confirmado; adicionar os secrets PROD apenas no deploy e validar o
+  fluxo real antes de conectar a conta.
 - [ ] Contas e tenants de clientes criados sem reutilizar dados do DEV.
 - [ ] Testes de isolamento entre tenants, login, refresh da sessão, logout,
   revogação, importação, OAuth, sincronização e restauração de backup.

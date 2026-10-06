@@ -4,7 +4,7 @@ from hashlib import sha256
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import Mock, patch
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 import autenticacao
 import integracao_mercadolivre as integracao
@@ -81,6 +81,113 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "URL HTTPS fixa"):
                 integracao._obter_configuracao_ml()
 
+    def test_configuracao_prod_seleciona_secrets_e_callback_proprios(self) -> None:
+        chave = Fernet.generate_key().decode("ascii")
+        valores = {
+            "MI_ENV": "production",
+            "MERCADOLIVRE_PROD_CLIENT_ID": "prod-app-id",
+            "MERCADOLIVRE_PROD_CLIENT_SECRET": "prod-app-secret",
+            "MERCADOLIVRE_PROD_REDIRECT_URI": integracao._REDIRECT_URI_PROD,
+            "MERCADOLIVRE_PROD_TOKEN_ENCRYPTION_KEY": chave,
+        }
+        nomes_lidos: list[str] = []
+
+        def obter_valor_configuracao(
+            nome: str,
+            *,
+            preferir_secrets: bool = False,
+        ) -> str | None:
+            nomes_lidos.append(nome)
+            if nome != "MI_ENV":
+                self.assertTrue(preferir_secrets)
+            return valores.get(nome)
+
+        with patch.object(
+            integracao,
+            "obter_configuracao",
+            side_effect=obter_valor_configuracao,
+        ):
+            configuracao = integracao._obter_configuracao_ml()
+
+        self.assertEqual(configuracao["client_id"], "prod-app-id")
+        self.assertEqual(configuracao["client_secret"], "prod-app-secret")
+        self.assertEqual(
+            configuracao["redirect_uri"],
+            "https://marketplace-intelligence-live.streamlit.app/",
+        )
+        self.assertEqual(configuracao["token_encryption_key"], chave)
+        url_autorizacao = integracao._url_de_autorizacao(
+            configuracao["client_id"],
+            configuracao["redirect_uri"],
+            "prod-state",
+            "prod-pkce",
+        )
+        self.assertEqual(
+            parse_qs(urlparse(url_autorizacao).query)["redirect_uri"],
+            [integracao._REDIRECT_URI_PROD],
+        )
+        self.assertEqual(
+            set(nomes_lidos),
+            {
+                "MI_ENV",
+                "MERCADOLIVRE_PROD_CLIENT_ID",
+                "MERCADOLIVRE_PROD_CLIENT_SECRET",
+                "MERCADOLIVRE_PROD_REDIRECT_URI",
+                "MERCADOLIVRE_PROD_TOKEN_ENCRYPTION_KEY",
+            },
+        )
+
+    def test_diagnostico_invalid_client_seleciona_secrets_prod(self) -> None:
+        with patch(
+            "integracao_mercadolivre.obter_configuracao",
+            side_effect=lambda nome, **_: {
+                "MI_ENV": "production",
+                "MERCADOLIVRE_PROD_CLIENT_ID": "prod-app-id",
+            }.get(nome),
+        ) as obter_configuracao:
+            with patch(
+                "integracao_mercadolivre.obter_origem_configuracao",
+                return_value="Streamlit Secrets",
+            ) as obter_origem:
+                mensagem = integracao._diagnostico_invalid_client()
+
+        self.assertIn("aplicação PROD selecionada", mensagem)
+        self.assertNotIn("prod-app-id", mensagem)
+        self.assertEqual(
+            [call.args[0] for call in obter_configuracao.call_args_list],
+            ["MI_ENV", "MERCADOLIVRE_PROD_CLIENT_ID"],
+        )
+        self.assertEqual(
+            [call.args[0] for call in obter_origem.call_args_list],
+            [
+                "MERCADOLIVRE_PROD_CLIENT_ID",
+                "MERCADOLIVRE_PROD_CLIENT_SECRET",
+            ],
+        )
+
+    def test_configuracao_prod_rejeita_callback_diferente(self) -> None:
+        valores = {
+            "MI_ENV": "production",
+            "MERCADOLIVRE_PROD_CLIENT_ID": "prod-app-id",
+            "MERCADOLIVRE_PROD_CLIENT_SECRET": "prod-app-secret",
+            "MERCADOLIVRE_PROD_REDIRECT_URI": (
+                "https://example.com/callback"
+            ),
+            "MERCADOLIVRE_PROD_TOKEN_ENCRYPTION_KEY": (
+                Fernet.generate_key().decode("ascii")
+            ),
+        }
+        with patch.object(
+            integracao,
+            "obter_configuracao",
+            side_effect=lambda nome, **_: valores.get(nome),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "MERCADOLIVRE_PROD_REDIRECT_URI precisa ser exatamente",
+            ):
+                integracao._obter_configuracao_ml()
+
     def test_geracao_pkce_usa_sha256_base64_url_sem_padding(self) -> None:
         verificador, desafio = integracao._gerar_pkce()
         desafio_esperado = (
@@ -106,6 +213,27 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
 
         self.assertNotEqual(token_cifrado, "token-de-teste")
         self.assertEqual(token, "token-de-teste")
+
+    def test_criptografia_prod_usa_chave_independente_da_dev(self) -> None:
+        chave_prod = Fernet.generate_key().decode("ascii")
+        chave_dev = Fernet.generate_key().decode("ascii")
+        valores = {
+            "MI_ENV": "production",
+            "MERCADOLIVRE_PROD_CLIENT_ID": "prod-app-id",
+            "MERCADOLIVRE_PROD_CLIENT_SECRET": "prod-app-secret",
+            "MERCADOLIVRE_PROD_REDIRECT_URI": integracao._REDIRECT_URI_PROD,
+            "MERCADOLIVRE_PROD_TOKEN_ENCRYPTION_KEY": chave_prod,
+        }
+        with patch.object(
+            integracao,
+            "obter_configuracao",
+            side_effect=lambda nome, **_: valores.get(nome),
+        ):
+            token = integracao._criptografar("token-prod")
+
+        self.assertEqual(Fernet(chave_prod).decrypt(token.encode()), b"token-prod")
+        with self.assertRaises(InvalidToken):
+            Fernet(chave_dev).decrypt(token.encode())
 
     @patch("integracao_mercadolivre.is_database_mode", return_value=False)
     def test_status_integracao_mercadolivre_indica_ambiente_dev(
@@ -222,7 +350,10 @@ class TestIntegracaoMercadoLivre(unittest.TestCase):
         obter_configuracao: Mock,
         obter_origem: Mock,
     ) -> None:
-        obter_configuracao.return_value = "6066488581881437"
+        obter_configuracao.side_effect = lambda nome, **_: {
+            "MI_ENV": "development",
+            "MERCADOLIVRE_DEV_CLIENT_ID": "6066488581881437",
+        }.get(nome)
         obter_origem.side_effect = [
             "Streamlit Secrets",
             "Streamlit Secrets",

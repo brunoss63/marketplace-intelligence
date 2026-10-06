@@ -33,6 +33,17 @@ _URL_TOKEN = "https://api.mercadolibre.com/oauth/token"
 _URL_USUARIO = "https://api.mercadolibre.com/users/me"
 _NOME_MARKETPLACE = "Mercado Livre"
 _CLIENT_ID_APLICACAO_DEV = "6066488581881437"
+_REDIRECT_URI_PROD = "https://marketplace-intelligence-live.streamlit.app/"
+_CONFIGURACOES_AMBIENTE = {
+    "development": {
+        "rotulo": "desenvolvimento",
+        "prefixo": "MERCADOLIVRE_DEV",
+    },
+    "production": {
+        "rotulo": "produção",
+        "prefixo": "MERCADOLIVRE_PROD",
+    },
+}
 _ANTECEDENCIA_REFRESH = timedelta(minutes=2)
 _TIMEOUT_REQUISICAO = (5, 15)
 
@@ -48,17 +59,19 @@ def _obter_usuario_id() -> str:
 
 def _obter_configuracao_ml() -> dict[str, str]:
     ambiente = obter_configuracao("MI_ENV")
-    if ambiente != "development":
+    configuracao_ambiente = _CONFIGURACOES_AMBIENTE.get(ambiente or "")
+    if configuracao_ambiente is None:
         raise RuntimeError(
-            "A integração Mercado Livre está disponível somente no ambiente "
-            "development até que uma aplicação de produção seja configurada."
+            "A integração Mercado Livre exige MI_ENV='development' ou "
+            "MI_ENV='production'."
         )
 
+    prefixo = configuracao_ambiente["prefixo"]
     nomes = {
-        "client_id": "MERCADOLIVRE_DEV_CLIENT_ID",
-        "client_secret": "MERCADOLIVRE_DEV_CLIENT_SECRET",
-        "redirect_uri": "MERCADOLIVRE_DEV_REDIRECT_URI",
-        "token_encryption_key": "MERCADOLIVRE_DEV_TOKEN_ENCRYPTION_KEY",
+        "client_id": f"{prefixo}_CLIENT_ID",
+        "client_secret": f"{prefixo}_CLIENT_SECRET",
+        "redirect_uri": f"{prefixo}_REDIRECT_URI",
+        "token_encryption_key": f"{prefixo}_TOKEN_ENCRYPTION_KEY",
     }
     configuracao = {
         chave: obter_configuracao(nome, preferir_secrets=True)
@@ -71,8 +84,9 @@ def _obter_configuracao_ml() -> dict[str, str]:
     ]
     if ausentes:
         raise RuntimeError(
-            "Configure estes secrets de desenvolvimento antes de conectar o "
-            "Mercado Livre: " + ", ".join(ausentes) + "."
+            "Configure estes secrets de "
+            f"{configuracao_ambiente['rotulo']} antes de conectar o Mercado "
+            "Livre: " + ", ".join(ausentes) + "."
         )
     valores = {chave: str(valor) for chave, valor in configuracao.items()}
     redirect_uri = valores["redirect_uri"]
@@ -85,24 +99,38 @@ def _obter_configuracao_ml() -> dict[str, str]:
         or redirect.password
         or redirect.query
         or redirect.fragment
+        or (
+            ambiente == "production"
+            and redirect_uri != _REDIRECT_URI_PROD
+        )
     ):
         raise RuntimeError(
-            "MERCADOLIVRE_DEV_REDIRECT_URI precisa ser uma URL HTTPS fixa, "
-            "sem credenciais, query string ou fragmento, e corresponder "
+            f"{nomes['redirect_uri']} precisa "
+            + (
+                f"ser exatamente {_REDIRECT_URI_PROD!r} "
+                if ambiente == "production"
+                else "ser uma URL HTTPS fixa "
+            )
+            + "sem credenciais, query string ou fragmento, e corresponder "
             "exatamente ao cadastro do aplicativo."
         )
     return valores
 
 
 def _fernet() -> Fernet:
-    chave = _obter_configuracao_ml()["token_encryption_key"]
+    configuracao = _obter_configuracao_ml()
+    ambiente = obter_configuracao("MI_ENV") or "development"
+    nome_chave = (
+        f"{_CONFIGURACOES_AMBIENTE[ambiente]['prefixo']}"
+        "_TOKEN_ENCRYPTION_KEY"
+    )
+    chave = configuracao["token_encryption_key"]
     try:
         return Fernet(chave.encode("ascii"))
     except (UnicodeEncodeError, ValueError) as erro:
         raise RuntimeError(
-            "MERCADOLIVRE_DEV_TOKEN_ENCRYPTION_KEY não é uma chave Fernet "
-            "válida. Preserve a chave existente para não perder acesso aos "
-            "tokens já armazenados."
+            f"{nome_chave} não é uma chave Fernet válida. Preserve a chave "
+            "existente para não perder acesso aos tokens já armazenados."
         ) from erro
 
 
@@ -157,7 +185,7 @@ def _url_de_autorizacao(
 def iniciar_conexao_mercadolivre() -> str:
     if not is_database_mode():
         raise RuntimeError(
-            "A conexão com marketplaces exige o ambiente Supabase DEV."
+            "A conexão com marketplaces exige o modo de banco Supabase."
         )
 
     configuracao = _obter_configuracao_ml()
@@ -337,23 +365,34 @@ def _mensagem_erro_oauth(status_code: int, corpo: Any) -> str:
 
 
 def _diagnostico_invalid_client() -> str:
+    ambiente = obter_configuracao("MI_ENV") or "development"
+    configuracao_ambiente = _CONFIGURACOES_AMBIENTE.get(ambiente)
+    if configuracao_ambiente is None:
+        return " Diagnóstico seguro: MI_ENV não seleciona um ambiente suportado."
+
+    prefixo = configuracao_ambiente["prefixo"]
     client_id = obter_configuracao(
-        "MERCADOLIVRE_DEV_CLIENT_ID",
+        f"{prefixo}_CLIENT_ID",
         preferir_secrets=True,
     )
-    id_corresponde = client_id == _CLIENT_ID_APLICACAO_DEV
     origem_client_id = obter_origem_configuracao(
-        "MERCADOLIVRE_DEV_CLIENT_ID",
+        f"{prefixo}_CLIENT_ID",
         preferir_secrets=True,
     )
     origem_client_secret = obter_origem_configuracao(
-        "MERCADOLIVRE_DEV_CLIENT_SECRET",
+        f"{prefixo}_CLIENT_SECRET",
         preferir_secrets=True,
     )
+    if ambiente == "development":
+        comparacao_app = (
+            "corresponde ao app DEV: "
+            f"{'sim' if client_id == _CLIENT_ID_APLICACAO_DEV else 'não'}"
+        )
+    else:
+        comparacao_app = "aplicação PROD selecionada"
     return (
         " Diagnóstico seguro: Client ID lido de "
-        f"{origem_client_id} (corresponde ao app DEV: "
-        f"{'sim' if id_corresponde else 'não'}); Client Secret lido de "
+        f"{origem_client_id} ({comparacao_app}); Client Secret lido de "
         f"{origem_client_secret}. Nenhum valor secreto foi exibido."
     )
 
@@ -665,7 +704,8 @@ def _renovar_tokens(
 def obter_access_token_mercadolivre() -> str:
     if not is_database_mode():
         raise RuntimeError(
-            "A API do Mercado Livre exige uma conexão no ambiente Supabase DEV."
+            "A API do Mercado Livre exige uma conexão com armazenamento "
+            "Supabase."
         )
     tenant_id = obter_tenant_id()
     conexao = _obter_conexao(incluir_tokens=True)
@@ -734,7 +774,7 @@ def _remover_conexao() -> None:
 def status_integracao_mercadolivre() -> str:
     """Resumo legível do estado atual da conexão do Mercado Livre."""
     if not is_database_mode():
-        return "Disponível somente em ambiente Supabase DEV."
+        return "Disponível somente com armazenamento Supabase (DEV/PROD)."
 
     try:
         _obter_configuracao_ml()
