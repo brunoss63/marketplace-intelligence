@@ -22,12 +22,13 @@
 - OAuth Mercado Livre PROD conectado inicialmente pelo owner; teste de
   sincronização e acesso persistente ainda pendentes
 - Fluxo próprio de convite/definição e recuperação de senha implementado, mas
-  parcialmente validado: o callback estático foi publicado e allowlisted no
-  Supabase Auth PROD; o owner confirmou que um link real de recuperação abriu o
-  formulário. O Site URL aponta para a página de callback e o domínio raiz do
-  app continua permitido. Os smoke tests sintéticos de link válido/expirado e
-  a verificação visual do tema passaram. Ainda falta testar o link real de
-  convite antes de convidar o cliente.
+  validado com uma conta de teste controlada pelo owner: convite real recebido,
+  formulário de senha aberto, senha definida pelo owner e login no app PROD
+  confirmado. O callback estático foi publicado e allowlisted no Supabase Auth
+  PROD; o Site URL aponta para a página de callback e o domínio raiz do app
+  continua permitido. Os smoke tests sintéticos de link expirado e a verificação
+  visual do tema também passaram. O cadastro e o onboarding do cliente continuam
+  pendentes de autorização e dados dele.
 - Shopee automatizada em PROD; enquanto o OAuth não for aprovado, avaliar a
   importação manual de arquivos Shopee como contingência
 - Persistência de login após F5/reconexão confirmada visualmente pelo owner;
@@ -307,26 +308,21 @@ OAuth ficam pendentes até a implementação e aprovação das integrações PRO
 - [ ] Confirmar que aparecem apenas para seu tenant (bruno.ribeirods99@gmail.com)
 
 #### ⏸️ Tarefa 4.2: Criar conta e tenant do cliente
-Não envie convite ainda. O cliente precisa conseguir aceitar o convite e definir
-a senha inicial sem depender de um script executado localmente pelo owner. O
-fluxo está publicado em `ecd47c7`. No Supabase Auth PROD, o Site URL aponta para
-o documento estático `~/+/app/static/auth_password_flow.html`, com os
-parâmetros públicos necessários; a raiz do app e esse callback estão na lista
-Redirect URLs. O owner confirmou que o link real de recuperação chegou ao
-formulário. Os smoke tests no browser com fragmentos fictícios também
-confirmaram que o formulário abre, o fragmento é removido e links expirados
-mostram erro sem submeter senha. O tema foi conferido em desktop e viewport
-móvel. Nenhuma senha foi alterada.
+O fluxo compartilhado de convite/definição de senha e recuperação está validado
+em PROD usando uma conta de teste controlada pelo owner: o e-mail real de
+convite chegou, abriu o formulário, o owner definiu a senha sem compartilhá-la
+e confirmou o login no app. O link real de recuperação também já havia aberto
+o formulário. Os smoke tests de link expirado, remoção do fragmento e tema
+desktop/móvel passaram. Nenhuma conta do cliente foi criada ou convidada.
 
-Antes do convite do cliente, mediante autorização do owner, validar um link real
-de convite e conferir o template Auth. Não convide o cliente até concluir essa
-validação. Também é necessário obter autorização e o e-mail individual do
-cliente.
+Quando a negociação avançar, obter autorização explícita e o e-mail individual
+do cliente; então criar o usuário/tenant exclusivo, convidá-lo e validar o
+onboarding com papel `member` antes de importar dados autorizados.
 
 Depois de liberada a produção:
 1. Convide a conta individual em Supabase PROD → Auth → Users.
-2. Teste o link de convite e a definição inicial da senha no próprio domínio
-   PROD, sem compartilhar credenciais por e-mail ou chat.
+2. O fluxo de convite e senha já foi testado com a conta de teste; confirme que
+   o e-mail e os dados pertencem ao cliente antes de prosseguir.
 3. Confirme o tenant exclusivo e aprove o onboarding com papel `member`.
 4. Valide o acesso da conta do cliente antes de importar dados autorizados.
 
@@ -515,9 +511,11 @@ distintas; essa conta ainda não foi criada.
   `static/auth_password_flow.html` como destino direto de convite e recuperação,
   fora da inicialização do Streamlit. O Supabase Auth PROD já permite esse
   destino e agora o usa como Site URL padrão; o domínio raiz continua permitido.
-  O owner confirmou o link real de recuperação; o smoke test sintético cobriu
-  expirado, execução do formulário e estilo desktop/móvel. Falta validar um link
-  real de convite antes de convidar o cliente.
+  Convite real e recuperação foram testados com uma conta controlada pelo owner:
+  ambos abriram o formulário, a senha do usuário de teste foi definida e o login
+  PROD foi confirmado. Os testes sintéticos cobriram links expirados e estilo
+  desktop/móvel. Criar e convidar a conta do cliente continua pendente de
+  autorização explícita e dos dados dele.
 - O identificador de sessão fica em cookie gerenciado pelo componente
   Streamlit; tokens Supabase são cifrados no Supabase. O cookie não é
   HttpOnly, uma limitação do componente, mas não conterá credenciais Supabase.
