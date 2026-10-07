@@ -107,17 +107,28 @@ class TestAuthSessionPersistence(unittest.TestCase):
     def test_email_recuperacao_usa_redirect_prod_fixo(self) -> None:
         cliente = Mock()
 
-        _solicitar_email_recuperacao(
-            cliente,
-            "cliente@example.com",
-            "production",
-        )
+        with patch(
+            "autenticacao._credenciais_supabase",
+            return_value=(
+                "https://example.supabase.co",
+                "sb_publishable_test",
+            ),
+        ):
+            _solicitar_email_recuperacao(
+                cliente,
+                "cliente@example.com",
+                "production",
+            )
 
         cliente.auth.reset_password_email.assert_called_once_with(
             "cliente@example.com",
             options={
                 "redirect_to":
-                    "https://marketplace-intelligence-live.streamlit.app/",
+                    _url_fluxo_definicao_senha(
+                        "production",
+                        "https://example.supabase.co",
+                        "sb_publishable_test",
+                    ),
             },
         )
 

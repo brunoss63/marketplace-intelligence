@@ -8,7 +8,7 @@
   const hasAuthError = ["error", "error_description", "error_code"]
     .some((key) => params.has(key) || query.has(key));
   if (!["invite", "recovery"].includes(flowType) && !hasAuthError) {
-    window.frameElement.hidden = true;
+    if (window.frameElement) window.frameElement.hidden = true;
     return;
   }
 
@@ -26,9 +26,10 @@
   const flow = document.getElementById("mi-auth-password-flow");
   const message = document.getElementById("mi-auth-password-message");
   const form = document.getElementById("mi-auth-password-form");
-  window.frameElement.style.height = "440px";
+  if (window.frameElement) window.frameElement.style.height = "440px";
   flow.hidden = false;
   const hideLogin = () => {
+    if (appWindow === window) return true;
     const loginRow = appWindow.document
       .querySelector(".st-key-mi-login-card")
       ?.closest('[data-testid="stHorizontalBlock"]');
@@ -36,7 +37,7 @@
     loginRow.hidden = true;
     return true;
   };
-  if (!hideLogin()) {
+  if (appWindow !== window && !hideLogin()) {
     const observer = new MutationObserver(() => {
       if (hideLogin()) observer.disconnect();
     });
@@ -94,8 +95,7 @@
       form.hidden = true;
       message.textContent = "Senha atualizada. Você já pode entrar no painel.";
       const link = document.createElement("a");
-      link.href = browserWindow.location.pathname;
-      link.target = "_top";
+      link.href = `${browserWindow.location.origin}/`;
       link.textContent = "Voltar para o login";
       message.appendChild(document.createElement("br"));
       message.appendChild(link);
