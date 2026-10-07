@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 import pandas as pd
@@ -38,90 +37,16 @@ def listar_tenants_administrados() -> list[dict[str, Any]]:
     return resposta.data or []
 
 
-def eh_administrador_piloto() -> bool:
-    """Indica se a conta atual tem a identidade global de admin do piloto."""
-    try:
-        resposta = obter_cliente_supabase().rpc(
-            "user_is_pilot_administrator"
-        ).execute()
-    except APIError as erro:
-        raise RuntimeError(
-            "Não foi possível validar a permissão de administrador do piloto: "
-            f"{erro.message}"
-        ) from erro
-    return resposta.data is True
-
-
-def exigir_administrador_piloto() -> None:
-    """Permite provisionar contas somente a administradores autorizados."""
-    if not eh_administrador_piloto():
-        raise RuntimeError(
-            "O provisionamento de contas é restrito ao administrador "
-            "explicitamente autorizado do piloto."
-        )
-
-
-def vincular_usuario_convidado_piloto(
-    *,
-    user_id: str,
-    nome_tenant: str,
-    papel: str = "member",
-) -> dict[str, Any]:
-    """Vincula ao tenant uma conta já criada no Supabase Auth."""
-    exigir_administrador_piloto()
-
-    if not user_id:
-        raise RuntimeError("É obrigatório informar o ID da conta convidada.")
-    if papel not in {"owner", "member"}:
-        raise RuntimeError("O papel do usuário deve ser 'owner' ou 'member'.")
-    try:
-        user_id = str(uuid.UUID(user_id.strip()))
-    except (AttributeError, ValueError) as erro:
-        raise RuntimeError(
-            "Informe um ID de usuário válido, copiado do Supabase Auth."
-        ) from erro
-
-    nome = (str(nome_tenant or "")).strip()
-    if not nome:
-        nome = f"Tenant piloto {user_id[:8]}"
-
-    cliente = obter_cliente_supabase()
-    try:
-        resposta = cliente.rpc(
-            "provision_pilot_user",
-            {
-                "p_user_id": str(user_id),
-                "p_tenant_name": nome,
-                "p_role": papel,
-                "p_actor_tenant_id": obter_tenant_id(),
-            },
-        ).execute()
-    except APIError as erro:
-        raise RuntimeError(
-            "Não foi possível vincular a conta convidada ao tenant: "
-            f"{erro.message}"
-        ) from erro
-
-    resultado = resposta.data
-    if isinstance(resultado, list) and resultado:
-        resultado = resultado[0]
-    if not isinstance(resultado, dict):
-        raise RuntimeError(
-            "O banco não confirmou o vínculo da conta convidada."
-        )
-    return resultado
-
-
 def mostrar_acesso_piloto_pendente() -> None:
     """Informa que a conta autenticada ainda aguarda vínculo administrativo."""
     st.subheader("Piloto privado")
     st.info(
-        "Sua conta está autenticada, mas o responsável pelo piloto ainda "
-        "precisa vinculá-la ao tenant correto."
+        "Sua conta está autenticada, mas não foi provisionada como convite "
+        "para um tenant do piloto."
     )
     st.caption(
-        "O convite do Supabase confirma sua identidade; o acesso aos dados só "
-        "é liberado depois que o responsável conclui esse vínculo."
+        "Entre em contato com o responsável pelo piloto para confirmar se o "
+        "convite foi enviado pelo Supabase Auth."
     )
 
 
@@ -204,71 +129,14 @@ def mostrar_painel_administracao() -> None:
         )
         st.stop()
 
-    vinculacao_concluida = st.session_state.pop(
-        "_mi_usuario_piloto_vinculado",
-        None,
-    )
-    if isinstance(vinculacao_concluida, dict):
-        st.success("Conta convidada vinculada ao tenant do piloto.")
-        st.caption(
-            f"Tenant: {vinculacao_concluida.get('tenant_id', '')} · "
-            f"Papel: {vinculacao_concluida.get('role', '')}"
-        )
-
     tenant_id = obter_tenant_id()
     membros = listar_membros_tenant()
     auditoria = listar_auditoria_acesso()
-    try:
-        administrador_piloto = eh_administrador_piloto()
-    except RuntimeError as erro:
-        st.error(str(erro))
-        st.stop()
     st.caption(f"Tenant atual: {tenant_id}")
     st.info(
         "Acesso administrativo foi reforçado para owner do tenant e toda ação "
         "de gestão fica registrada em auditoria para acompanhamento futuro."
     )
-
-    st.markdown("### Preparar acesso por convite")
-    if not administrador_piloto:
-        st.info(
-            "A preparação de contas convidadas é restrita ao administrador "
-            "autorizado do piloto."
-        )
-    else:
-        st.caption(
-            "No Supabase Auth, convide primeiro o e-mail individual autorizado. "
-            "Copie o User ID da conta criada e faça o vínculo aqui antes de o "
-            "cliente aceitar o convite."
-        )
-        st.caption(
-            "O vínculo cria um tenant exclusivo. O aceite do convite libera o "
-            "login nesse tenant, sem uma segunda solicitação de acesso."
-        )
-        with st.form("mi_pilot_invited_user_form"):
-            user_id = st.text_input("User ID da conta no Supabase Auth")
-            nome_tenant = st.text_input("Nome do tenant do cliente")
-            papel = st.selectbox(
-                "Papel no tenant",
-                ["member", "owner"],
-                help="Use member por padrão; owner só se o cliente precisar administrar o tenant.",
-            )
-            vincular = st.form_submit_button(
-                "Vincular conta e criar tenant",
-                type="primary",
-            )
-        if vincular:
-            try:
-                resultado = vincular_usuario_convidado_piloto(
-                    user_id=user_id,
-                    nome_tenant=nome_tenant,
-                    papel=papel,
-                )
-            except RuntimeError as erro:
-                st.error(str(erro))
-            else:
-                st.session_state["_mi_usuario_piloto_vinculado"] = resultado
-                st.rerun()
 
     st.markdown("### Membros do tenant")
     if membros:

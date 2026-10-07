@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import administracao
@@ -28,54 +29,27 @@ class TestAdministracaoTenant(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Acesso administrativo"):
             administracao.exigir_permissao_admin_tenant()
 
-    @patch("administracao.exigir_administrador_piloto")
-    @patch("administracao.obter_cliente_supabase")
-    @patch("administracao.obter_tenant_id", return_value="owner-tenant-1")
-    def test_vincular_usuario_convidado_cria_tenant_e_vinculo(
+    def test_migration_provisiona_tenant_automaticamente_para_convite_auth(
         self,
-        tenant_id_mock: Mock,
-        cliente_mock: Mock,
-        _: Mock,
     ) -> None:
-        cliente_mock.return_value.rpc.return_value.execute.return_value.data = {
-            "tenant_id": "tenant-provision-1",
-            "user_id": "d9428888-122b-4c4f-a867-03b12a5fca01",
-            "role": "member",
-        }
+        migration = (
+            Path(__file__).resolve().parents[1]
+            / "supabase"
+            / "migrations"
+            / "20261007131000_auto_provision_invited_users.sql"
+        ).read_text(encoding="utf-8")
 
-        evento = administracao.vincular_usuario_convidado_piloto(
-            user_id="D9428888-122B-4C4F-A867-03B12A5FCA01",
-            nome_tenant="Tenant do piloto A",
-            papel="member",
+        self.assertIn("after insert on auth.users", migration)
+        self.assertIn("when (new.invited_at is not null)", migration)
+        self.assertIn("insert into public.tenants", migration)
+        self.assertIn("insert into public.tenant_members", migration)
+        self.assertIn("values (v_tenant_id, new.id, 'member')", migration)
+        self.assertIn("security definer", migration)
+        self.assertIn("set search_path = ''", migration)
+        self.assertIn(
+            "drop function if exists public.provision_pilot_user",
+            migration,
         )
-
-        self.assertEqual(evento["tenant_id"], "tenant-provision-1")
-        self.assertEqual(evento["user_id"], "d9428888-122b-4c4f-a867-03b12a5fca01")
-        self.assertEqual(evento["role"], "member")
-        cliente_mock.return_value.rpc.assert_called_once_with(
-            "provision_pilot_user",
-            {
-                "p_user_id": "d9428888-122b-4c4f-a867-03b12a5fca01",
-                "p_tenant_name": "Tenant do piloto A",
-                "p_role": "member",
-                "p_actor_tenant_id": "owner-tenant-1",
-            },
-        )
-
-    @patch("administracao.exigir_administrador_piloto")
-    @patch("administracao.obter_cliente_supabase")
-    def test_vincular_usuario_convidado_rejeita_uuid_invalido(
-        self,
-        cliente_mock: Mock,
-        _: Mock,
-    ) -> None:
-        with self.assertRaisesRegex(RuntimeError, "ID de usuário válido"):
-            administracao.vincular_usuario_convidado_piloto(
-                user_id="not-a-uuid",
-                nome_tenant="Tenant do piloto A",
-            )
-
-        cliente_mock.assert_not_called()
 
     @patch("administracao.eh_owner_tenant", return_value=True)
     @patch("administracao.obter_cliente_supabase")
@@ -133,10 +107,8 @@ class TestAdministracaoTenant(unittest.TestCase):
     @patch("administracao.st.info")
     @patch("administracao.st.caption")
     @patch("administracao.st.subheader")
-    @patch("administracao.eh_administrador_piloto", return_value=False)
     def test_mostrar_painel_administracao_renderiza_sem_erros(
         self,
-        _admin: Mock,
         _subheader: Mock,
         _caption: Mock,
         _info: Mock,

@@ -83,40 +83,36 @@ atender outro cliente.
 
 O acesso operacional continua restrito ao tenant ao qual cada conta está
 vinculada: owners administram o próprio tenant, mas não podem consultar dados
-de outros tenants. O painel registra ações administrativas no tenant. A
-identidade global autorizada para provisionar contas não concede acesso
-cruzado aos dados operacionais; o cliente deve operar seu próprio tenant.
-Qualquer futura função de administração entre tenants precisa de autorização
-explícita e auditoria própria. Não use chaves `service_role` no navegador ou
-na aplicação Streamlit para contornar o isolamento RLS.
+de outros tenants. O painel registra ações administrativas no tenant; o
+provisionamento automático cria um tenant exclusivo para cada conta convidada
+e não concede acesso cruzado aos dados operacionais. Qualquer futura função de
+administração entre tenants precisa de autorização explícita e auditoria
+própria. Não use chaves `service_role` no navegador ou na aplicação Streamlit
+para contornar o isolamento RLS.
 
-### Fluxo de convite e vínculo do piloto
+### Fluxo automático de convite e acesso
 
-O convite do Supabase Auth confirma a identidade; o vínculo em
-`tenant_members` autoriza o acesso aos dados. Para evitar uma etapa duplicada
-para o cliente, o responsável prepara esse vínculo antes de o cliente aceitar:
+O convite do Supabase Auth cria a identidade. Um trigger de banco identifica
+contas com `invited_at` e, na mesma transação, cria um tenant exclusivo e o
+vínculo `member`. O cliente não precisa solicitar acesso nem esperar por uma
+etapa manual:
 
 1. Confirme a autorização do cliente e seu e-mail individual.
 2. Em Supabase Auth → Users, envie o convite para esse e-mail.
-3. Copie o User ID da conta criada e, no painel administrativo do app, prepare
-   o acesso com esse ID, o nome do tenant exclusivo e o papel apropriado.
-   Use `member` por padrão; `owner` somente quando o cliente precisar
-   administrar o próprio tenant.
-4. O banco verifica que a conta existe no Auth, que ainda não está vinculada a
-   outro tenant e que o operador é um administrador do piloto e owner do tenant
-   de auditoria. A criação do tenant, vínculo e auditoria é transacional.
-5. Depois de aceitar o convite e definir a senha, o cliente entra diretamente
-   no tenant já preparado. Não há solicitação de acesso dentro do app.
+3. O trigger `provision_invited_pilot_user` cria o tenant isolado e vincula a
+   conta ao papel `member` antes do primeiro login.
+4. O cliente aceita o convite, define a senha e entra diretamente no painel.
 
-Se o cliente aceitar antes de o responsável preparar o vínculo, ele verá uma
-mensagem de acesso pendente; nenhum dado de tenant será liberado até a
-conclusão do provisionamento. A operação depende da migração
-`supabase/migrations/20261007125000_provision_invited_pilot_user.sql`. A
-primeira conta administradora continua sendo autorizada separadamente no
-Supabase pelo responsável do projeto. O evento antigo
-`pilot_onboarding_request` permanece no schema somente para compatibilidade com
-registros históricos; a migração remove a antiga função de aprovação e o fluxo
-atual não cria nem exige esses eventos.
+O trigger roda apenas em novos registros do Auth que tenham `invited_at`;
+cadastros sem convite e contas existentes não recebem acesso automaticamente.
+O tenant é criado com um nome padrão baseado no ID da conta. A sincronização de
+`auth.users`, tenant e membership é atômica: se o provisionamento falhar, o
+registro do convite também falha em vez de deixar uma conta parcialmente
+liberada. A operação depende da migração
+`supabase/migrations/20261007131000_auto_provision_invited_users.sql`.
+Contas já existentes antes da migração não são alteradas por esse trigger.
+Em particular, a conta de teste `bruninhuu99@gmail.com` já foi vinculada
+manualmente a um tenant isolado como `member`.
 
 Mercado Livre e Shopee são possibilidades do produto, não pré-requisitos para
 o primeiro piloto: priorize o marketplace que o cliente escolhido realmente

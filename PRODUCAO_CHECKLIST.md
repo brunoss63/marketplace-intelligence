@@ -137,13 +137,21 @@
 - [x] Criar o primeiro usuário Auth por convite e executar o seed
   `20261002153000_pilot_owner.sql`, que criou o tenant de demonstração e o
   vínculo `owner`.
-- [x] Registrar o owner em `pilot_administrators` para habilitar o
-  provisionamento de contas convidadas.
+- [x] Registrar o owner em `pilot_administrators` para o fluxo anterior de
+  aprovação de onboarding (retirado após a adoção do provisionamento
+  automático por convite).
 - [x] Validar no SQL Editor: 1 usuário Auth, 1 tenant, 1 vínculo owner, 1
   administrador, 12 tabelas com RLS e zero tabelas com qualquer privilégio
   para `anon`.
 - [x] Definir a senha da conta owner pelo utilitário local de recuperação PROD.
 - [x] Criar o deploy PROD separado e testar o login owner nesse deploy.
+- [x] Aplicar a migration de provisionamento automático de contas convidadas
+  pelo SQL Editor PROD.
+- [x] Confirmar que o trigger de `auth.users` só dispara quando `invited_at`
+  está preenchido; a conta `bruninhuu99@gmail.com` ficou em tenant isolado com
+  papel `member` e um único vínculo.
+- [x] Fazer smoke test transacional do trigger com usuário sintético e confirmar
+  que não restaram usuários de teste após a limpeza.
 - [x] Executar teste transacional de isolamento RLS com tenant de teste e
   identidade sintética não associada; todas as 14 verificações passaram e os
   fixtures foram confirmados ausentes após `ROLLBACK`.
@@ -316,18 +324,15 @@ o formulário. Os smoke tests de link expirado, remoção do fragmento e tema
 desktop/móvel passaram. Nenhuma conta do cliente foi criada ou convidada.
 
 Quando a negociação avançar, obter autorização explícita e o e-mail individual
-do cliente; convidá-lo no Supabase Auth, vincular o User ID a um tenant
-exclusivo no painel administrativo e validar o acesso com papel `member` antes
-de importar dados autorizados. O vínculo deve ser preparado antes de o cliente
-aceitar o convite para que ele chegue diretamente ao painel.
+do cliente e convidá-lo no Supabase Auth. A migration automática cria o tenant
+isolado e o vínculo `member` durante a criação do convite; validar o primeiro
+login antes de importar dados autorizados.
 
 Depois de liberada a produção:
 1. Convide a conta individual em Supabase PROD → Auth → Users.
-2. Confirme que o e-mail e os dados pertencem ao cliente; copie o User ID.
-3. Aplique `supabase/migrations/20261007125000_provision_invited_pilot_user.sql`
-   no projeto PROD e use a seção “Preparar acesso por convite” para criar o
-   tenant exclusivo e vincular a conta com papel `member`.
-4. O fluxo de convite e senha já foi testado com a conta de teste; valide o
+2. Confirme que o e-mail e os dados pertencem ao cliente. O trigger provisiona
+   automaticamente um tenant exclusivo com papel `member`.
+3. O fluxo de convite e senha já foi testado com a conta de teste; valide o
    aceite do convite e o acesso ao tenant do cliente antes de importar dados.
 
 #### 🟡 Tarefa 4.3: Validar isolamento de dados

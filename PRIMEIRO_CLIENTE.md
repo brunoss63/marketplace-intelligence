@@ -11,8 +11,9 @@ Ele diferencia o que pode ser feito com o ambiente atual de desenvolvimento
   **DEV**, não um projeto de produção.
 - O cadastro público está desativado. Uma conta precisa ser criada ou
   convidada pelo responsável no Supabase Auth antes que o cliente possa entrar.
-- O responsável deve vincular a conta convidada a um tenant exclusivo antes de
-  o cliente aceitar o convite. O app não oferece solicitação pública de acesso.
+- Ao enviar um convite pelo Supabase Auth, o banco cria automaticamente um
+  tenant exclusivo e vincula a conta como `member`. Após aceitar e definir a
+  senha, o cliente pode entrar diretamente no painel.
 - O OAuth do Mercado Livre está configurado apenas para `development` e para
   a aplicação/URI de retorno do DEV. A própria aplicação informa que a
   integração está disponível somente nesse ambiente até a configuração de uma
@@ -70,29 +71,21 @@ conclua os demais itens de segurança e isolamento abaixo.
 4. Envie ao cliente o endereço
    `https://marketplace-intelligence-dev.streamlit.app/` e as instruções para
    concluir o acesso à conta Supabase.
-5. Antes de o cliente aceitar, copie o User ID criado no Supabase Auth e use a
-   seção “Preparar acesso por convite” do painel administrativo. Crie um tenant
-   exclusivo e vincule a conta; use `member` por padrão e `owner` somente se o
-   cliente precisar administrar o próprio tenant.
-6. Confirme que o tenant e o vínculo foram criados. Depois, envie ao cliente o
-   endereço do app e peça que conclua o convite e entre. Após aceitar, ele deve
-   chegar diretamente ao tenant preparado.
-7. Se o cliente aceitar antes do provisionamento, o app informa que o acesso
-   está pendente e não mostra dados. Conclua o vínculo no painel e peça que
-   atualize a página.
-8. Com o cliente conectado, confira o isolamento do tenant antes de carregar
-   qualquer dado. O acesso deve ficar limitado aos registros desse tenant pelas
-   policies RLS.
+5. O trigger do Supabase cria automaticamente um tenant exclusivo e associa a
+   conta como `member` quando o convite Auth é criado.
+6. Envie ao cliente o endereço do app e peça que aceite o convite e defina a
+   senha; no primeiro login, ele deve chegar ao painel sem solicitar acesso.
+7. Antes de importar dados, confirme que o cliente opera no tenant isolado
+   correto e que as policies RLS limitam o acesso aos registros desse tenant.
+   Se o convite falhar, resolva o erro de provisionamento antes de reenviá-lo.
 
-O aprovador precisa estar previamente autorizado em `pilot_administrators` e
-estar autenticado em um tenant para usar o fluxo administrativo. Ser owner de
-um tenant, por si só, não concede permissão global de aprovação. A primeira
-autorização administrativa é feita separadamente pelo responsável do projeto
-Supabase.
+O provisionamento automático aplica `member` aos convites. Contas owner e
+administrativas continuam sendo configuradas separadamente pelo responsável
+do projeto.
 
 ## Fase 3 — conectar o Mercado Livre, se fizer parte do piloto
 
-1. Faça esta etapa somente depois de o cliente ter login e tenant aprovados.
+1. Faça esta etapa somente depois de o cliente ter login e tenant provisionado.
 2. O próprio cliente deve abrir **Marketplaces** e iniciar a conexão. Ele
    autentica no Mercado Livre e autoriza a aplicação; nunca solicite a senha
    do Mercado Livre.
