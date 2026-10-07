@@ -97,11 +97,15 @@ class TestAuthSessionPersistence(unittest.TestCase):
         self.assertIn("error_description", script)
         self.assertIn('method: "PUT"', script)
         self.assertIn("accessToken", script)
-        self.assertIn("minlength=", (
+        page = (
             Path(__file__).resolve().parents[1]
             / "static"
             / "auth_password_flow.html"
-        ).read_text(encoding="utf-8"))
+        ).read_text(encoding="utf-8")
+        self.assertIn("minlength=", page)
+        self.assertIn("color-scheme: dark", page)
+        self.assertIn("background: #0F172A", page)
+        self.assertIn("background: #4F91F5", page)
         self.assertNotIn("service_role", script)
 
     def test_email_recuperacao_usa_redirect_prod_fixo(self) -> None:
