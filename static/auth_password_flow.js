@@ -7,7 +7,10 @@
   const query = new URLSearchParams(browserWindow.location.search);
   const hasAuthError = ["error", "error_description", "error_code"]
     .some((key) => params.has(key) || query.has(key));
-  if (!["invite", "recovery"].includes(flowType) && !hasAuthError) return;
+  if (!["invite", "recovery"].includes(flowType) && !hasAuthError) {
+    window.frameElement.hidden = true;
+    return;
+  }
 
   browserWindow.history.replaceState(
     null,
@@ -23,6 +26,7 @@
   const flow = document.getElementById("mi-auth-password-flow");
   const message = document.getElementById("mi-auth-password-message");
   const form = document.getElementById("mi-auth-password-form");
+  window.frameElement.style.height = "440px";
   flow.hidden = false;
   const hideLogin = () => {
     const loginRow = appWindow.document
@@ -48,9 +52,9 @@
     return;
   }
 
-  const script = document.currentScript;
-  const supabaseUrl = script?.dataset.supabaseUrl;
-  const publicKey = script?.dataset.supabasePublicKey;
+  const config = new URLSearchParams(window.location.search);
+  const supabaseUrl = config.get("supabase_url");
+  const publicKey = config.get("supabase_public_key");
   if (!supabaseUrl || !publicKey) {
     message.textContent =
       "Não foi possível carregar a configuração de senha. Tente novamente.";

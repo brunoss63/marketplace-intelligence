@@ -4,9 +4,8 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from html import escape as html_escape
 from secrets import token_urlsafe
-from urllib.parse import unquote
+from urllib.parse import urlencode, unquote
 
 import streamlit as st
 import extra_streamlit_components as stx
@@ -55,57 +54,21 @@ def _url_redirecionamento_autenticacao(ambiente: str) -> str:
         ) from erro
 
 
-def _html_fluxo_definicao_senha(url: str, chave_publica: str) -> str:
-    html = """
-<div id="mi-auth-password-flow" hidden>
-  <style>
-    #mi-auth-password-flow {
-      box-sizing: border-box;
-      margin: 2rem auto;
-      max-width: 30rem;
-      padding: 1.5rem;
-      border: 1px solid rgba(128, 128, 128, .25);
-      border-radius: 1rem;
-    }
-    #mi-auth-password-flow label,
-    #mi-auth-password-flow input,
-    #mi-auth-password-flow button { display: block; width: 100%; }
-    #mi-auth-password-flow input,
-    #mi-auth-password-flow button {
-      box-sizing: border-box;
-      margin-top: .5rem;
-      padding: .7rem;
-    }
-    #mi-auth-password-flow label { margin-top: 1rem; }
-  </style>
-  <h2>Defina sua senha</h2>
-  <p id="mi-auth-password-message" role="status">
-    Validando o link de acesso...
-  </p>
-  <form id="mi-auth-password-form" hidden>
-    <label for="mi-auth-password">Nova senha</label>
-    <input id="mi-auth-password" type="password" minlength="12"
-           autocomplete="new-password" required>
-    <label for="mi-auth-password-confirm">Confirme a nova senha</label>
-    <input id="mi-auth-password-confirm" type="password" minlength="12"
-           autocomplete="new-password" required>
-    <button id="mi-auth-password-submit" type="submit">
-      Salvar senha
-    </button>
-  </form>
-</div>
-<script
-  src="app/static/auth_password_flow.js"
-  data-supabase-url="__SUPABASE_URL__"
-  data-supabase-public-key="__SUPABASE_PUBLIC_KEY__"
-></script>
-"""
-    return html.replace(
-        "__SUPABASE_URL__",
-        html_escape(url, quote=True),
-    ).replace(
-        "__SUPABASE_PUBLIC_KEY__",
-        html_escape(chave_publica, quote=True),
+def _url_fluxo_definicao_senha(
+    ambiente: str,
+    url_supabase: str,
+    chave_publica: str,
+) -> str:
+    url_app = _url_redirecionamento_autenticacao(ambiente)
+    parametros = urlencode(
+        {
+            "supabase_url": url_supabase,
+            "supabase_public_key": chave_publica,
+        }
+    )
+    return (
+        f"{url_app}~/+/app/static/auth_password_flow.html?"
+        f"{parametros}"
     )
 
 
@@ -606,8 +569,12 @@ def _renderizar_login(
             "definir a senha."
         )
     st.iframe(
-        _html_fluxo_definicao_senha(url_supabase, chave_publica),
-        height="content",
+        _url_fluxo_definicao_senha(
+            ambiente,
+            url_supabase,
+            chave_publica,
+        ),
+        height=440,
     )
     st.markdown('<div class="mi-login-layout"></div>', unsafe_allow_html=True)
     painel, formulario = st.columns([1.05, .95], gap="large")

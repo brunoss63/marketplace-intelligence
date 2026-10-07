@@ -13,7 +13,6 @@ from autenticacao import (
     _COOKIE_SESSAO,
     _COOKIE_SESSAO_PROD,
     _hash_id_sessao_prod,
-    _html_fluxo_definicao_senha,
     _ler_sessao_cookie,
     _limpar_sessao,
     _preparar_cookie_sessao,
@@ -23,6 +22,7 @@ from autenticacao import (
     _revogar_sessao_prod,
     _solicitar_email_recuperacao,
     _url_redirecionamento_autenticacao,
+    _url_fluxo_definicao_senha,
     _usar_cookie_sessao,
 )
 from streamlit.testing.v1 import AppTest
@@ -65,20 +65,28 @@ class TestAuthSessionPersistence(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             _url_redirecionamento_autenticacao("local")
 
-    def test_html_de_senha_trata_convite_e_recuperacao_no_navegador(self) -> None:
-        html = _html_fluxo_definicao_senha(
+    def test_url_fluxo_senha_aponta_para_documento_estatico_por_ambiente(
+        self,
+    ) -> None:
+        url = _url_fluxo_definicao_senha(
+            "production",
             "https://example.supabase.co",
             "sb_publishable_test",
         )
 
-        self.assertIn('src="app/static/auth_password_flow.js"', html)
-        self.assertIn(
-            'data-supabase-url="https://example.supabase.co"',
-            html,
+        self.assertTrue(
+            url.startswith(
+                "https://marketplace-intelligence-live.streamlit.app/"
+                "~/+/app/static/auth_password_flow.html?"
+            )
         )
         self.assertIn(
-            'data-supabase-public-key="sb_publishable_test"',
-            html,
+            "supabase_url=https%3A%2F%2Fexample.supabase.co",
+            url,
+        )
+        self.assertIn(
+            "supabase_public_key=sb_publishable_test",
+            url,
         )
         script = (
             Path(__file__).resolve().parents[1]
@@ -89,8 +97,12 @@ class TestAuthSessionPersistence(unittest.TestCase):
         self.assertIn("error_description", script)
         self.assertIn('method: "PUT"', script)
         self.assertIn("accessToken", script)
-        self.assertIn('minlength="12"', html)
-        self.assertNotIn("service_role", html + script)
+        self.assertIn("minlength=", (
+            Path(__file__).resolve().parents[1]
+            / "static"
+            / "auth_password_flow.html"
+        ).read_text(encoding="utf-8"))
+        self.assertNotIn("service_role", script)
 
     def test_email_recuperacao_usa_redirect_prod_fixo(self) -> None:
         cliente = Mock()

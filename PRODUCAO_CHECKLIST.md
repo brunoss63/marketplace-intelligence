@@ -23,9 +23,9 @@
   sincronização e acesso persistente ainda pendentes
 - Fluxo próprio de convite/definição e recuperação de senha implementado, mas
   ainda bloqueado: o smoke test PROD mostrou que scripts inline ficam inertes
-  no deploy. A correção local carrega um arquivo JavaScript estático do próprio
-  app; não convidar o cliente até publicar e validar o formulário no navegador
-  PROD.
+  dentro de componentes. A correção local carrega um documento HTML estático
+  completo do próprio app em um iframe; não convidar o cliente até publicar e
+  validar o formulário no navegador PROD.
 - Shopee automatizada em PROD; enquanto o OAuth não for aprovado, avaliar a
   importação manual de arquivos Shopee como contingência
 - Persistência de login após F5/reconexão confirmada visualmente pelo owner;
@@ -308,11 +308,11 @@ Não envie convite ainda. O cliente precisa conseguir aceitar o convite e defini
 a senha inicial sem depender de um script executado localmente pelo owner. O
 fluxo foi publicado em `d1ad9b0`, mas o smoke test no domínio PROD mostrou que
 scripts inline permanecem inertes tanto em `st.html` quanto em `st.iframe`. A
-correção local habilita o serviço estático do Streamlit e carrega o callback
-JavaScript de um arquivo da mesma origem; ela precisa ser publicada e validada
-no navegador antes de convidar. Depois, ainda será necessário testar links
-válidos/expirados e conferir os templates/redirects de Auth. Também é necessário
-obter autorização e o e-mail individual do cliente.
+correção local habilita o serviço estático do Streamlit e carrega um documento
+HTML completo, com JavaScript externo, em um iframe separado; ela precisa ser
+publicada e validada no navegador antes de convidar. Depois, ainda será
+necessário testar links válidos/expirados e conferir os templates/redirects de
+Auth. Também é necessário obter autorização e o e-mail individual do cliente.
 
 Depois de liberada a produção:
 1. Convide a conta individual em Supabase PROD → Auth → Users.
@@ -504,8 +504,8 @@ distintas; essa conta ainda não foi criada.
   marketplaces, sem gravá-la em arquivos versionados ou no chat.
 - O callback para convite/definição e recuperação está publicado, mas o smoke
   test no navegador PROD confirmou que scripts inline permanecem inertes. A
-  correção local carrega o callback de `static/auth_password_flow.js` pela
-  mesma origem; publicar e confirmar a execução, o formulário e a remoção do
+  correção local usa o documento `static/auth_password_flow.html` com script
+  externo; publicar e confirmar a execução, o formulário e a remoção do
   fragmento antes de convidar o cliente.
 - O identificador de sessão fica em cookie gerenciado pelo componente
   Streamlit; tokens Supabase são cifrados no Supabase. O cookie não é
