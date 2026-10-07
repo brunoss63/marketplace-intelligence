@@ -95,7 +95,7 @@ def _html_fluxo_definicao_senha(url: str, chave_publica: str) -> str:
   </form>
 </div>
 <script
-  src="/app/static/auth_password_flow.js"
+  src="app/static/auth_password_flow.js"
   data-supabase-url="__SUPABASE_URL__"
   data-supabase-public-key="__SUPABASE_PUBLIC_KEY__"
 ></script>

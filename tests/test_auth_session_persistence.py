@@ -71,7 +71,7 @@ class TestAuthSessionPersistence(unittest.TestCase):
             "sb_publishable_test",
         )
 
-        self.assertIn('src="/app/static/auth_password_flow.js"', html)
+        self.assertIn('src="app/static/auth_password_flow.js"', html)
         self.assertIn(
             'data-supabase-url="https://example.supabase.co"',
             html,
