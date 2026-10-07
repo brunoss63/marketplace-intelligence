@@ -22,11 +22,11 @@
 - OAuth Mercado Livre PROD conectado inicialmente pelo owner; teste de
   sincronização e acesso persistente ainda pendentes
 - Fluxo próprio de convite/definição e recuperação de senha implementado, mas
-  ainda bloqueado: o smoke test PROD mostrou que scripts inline ficam inertes
-  dentro de componentes e a aplicação remove o fragmento de callback durante a
-  inicialização. A correção local usa uma página estática completa como destino
-  direto do Auth; não convidar o cliente até publicar, allowlistar esse destino
-  no Supabase Auth e validar o fluxo no navegador PROD.
+  ainda pendente de teste real: o código foi publicado e o callback estático foi
+  allowlisted no Supabase Auth PROD. O Site URL agora aponta para a página de
+  callback e o domínio raiz do app continua permitido. O smoke test com dados
+  fictícios passou; validar um link real de convite e um de recuperação antes
+  de convidar o cliente.
 - Shopee automatizada em PROD; enquanto o OAuth não for aprovado, avaliar a
   importação manual de arquivos Shopee como contingência
 - Persistência de login após F5/reconexão confirmada visualmente pelo owner;
@@ -91,14 +91,15 @@
   PROD estava com Site URL `http://localhost:3000` e sem Redirect URLs. Após
   criar o deploy de validação, ambos foram atualizados para
   `https://marketplace-intelligence-live.streamlit.app`.
+- Em 7 de outubro de 2026, o Supabase Auth PROD foi configurado para usar o
+  documento `~/+/app/static/auth_password_flow.html` como Site URL de callbacks
+  Auth padrão; o domínio raiz do app continua permitido em Redirect URLs. O
+  destino inclui apenas a URL e a chave publicável do Supabase como parâmetros.
 - Foi criado `recuperar_senha_prod.py`, um utilitário temporário local que
   aceita somente o URL e a chave `sb_publishable_` do Reference ID PROD
   confirmado, vincula o servidor a `127.0.0.1` e altera a senha apenas após um
-  link de recuperação válido. Nunca usa `service_role`.
-- O owner pode solicitar **Send password recovery** no Supabase Auth Users
-  enquanto o utilitário estiver executando; o link deve abrir
-  `http://localhost:3000`. Aceite apenas o formulário servido localmente e
-  encerre o servidor depois de definir a senha.
+  link de recuperação válido. Nunca usa `service_role`. Esse procedimento foi
+  temporário para o owner e não é o fluxo atual de acesso do cliente.
 - Em 6 de outubro de 2026, o owner confirmou que redefiniu a senha pelo link
   de recuperação. O servidor local foi encerrado após a confirmação.
 - No painel, a organização Free atingiu o limite de dois projetos ativos. O
@@ -307,16 +308,18 @@ OAuth ficam pendentes até a implementação e aprovação das integrações PRO
 #### ⏸️ Tarefa 4.2: Criar conta e tenant do cliente
 Não envie convite ainda. O cliente precisa conseguir aceitar o convite e definir
 a senha inicial sem depender de um script executado localmente pelo owner. O
-fluxo foi publicado em `d1ad9b0`, mas o smoke test no domínio PROD mostrou que
-scripts inline permanecem inertes tanto em `st.html` quanto em `st.iframe`, e a
-aplicação remove o fragmento de callback antes do iframe conseguir processá-lo.
-A correção local habilita o serviço estático e redireciona os links de
-recuperação para uma página HTML própria, servida pelo app fora do `srcdoc`.
-Publicar a correção, incluir o destino estático na lista Auth → URL
-Configuration → Redirect URLs do Supabase PROD e configurar o convite para
-usar esse destino antes de testar e convidar. Depois, testar links
-válidos/expirados e conferir os templates de Auth. Também é necessário obter
-autorização e o e-mail individual do cliente.
+fluxo foi publicado em `4d67b8e`. No Supabase Auth PROD, o Site URL aponta para
+o documento estático `~/+/app/static/auth_password_flow.html`, com os
+parâmetros públicos necessários; a raiz do app e esse callback estão na lista
+Redirect URLs. O smoke test no browser com fragmentos fictícios confirmou que
+o formulário de senha abre, o fragmento é removido e links expirados mostram
+erro sem submeter senha. Nenhum e-mail foi enviado nem senha alterada.
+
+Antes do convite do cliente, mediante autorização do owner, solicitar um link
+real de recuperação para a conta owner e validar o percurso até o formulário;
+depois validar um link real de convite. Não convide o cliente até confirmar
+ambos e verificar os templates Auth. Também é necessário obter autorização e o
+e-mail individual do cliente.
 
 Depois de liberada a produção:
 1. Convide a conta individual em Supabase PROD → Auth → Users.
@@ -506,12 +509,12 @@ distintas; essa conta ainda não foi criada.
 - `AUTH_SESSION_ENCRYPTION_KEY` foi configurada pelo owner somente nos Secrets
   do Streamlit PROD; mantê-la estável e independente das chaves dos
   marketplaces, sem gravá-la em arquivos versionados ou no chat.
-- O callback para convite/definição e recuperação está publicado, mas o smoke
-  test no navegador PROD confirmou que o Streamlit limpa o fragmento antes do
-  callback embutido poder lê-lo. A correção local define o documento
-  `static/auth_password_flow.html` como destino direto dos e-mails, com script
-  externo; publicar, allowlistar o destino no Supabase Auth e confirmar a
-  execução, o formulário e a remoção do fragmento antes de convidar o cliente.
+- O callback publicado em `4d67b8e` usa o documento estático
+  `static/auth_password_flow.html` como destino direto de convite e recuperação,
+  fora da inicialização do Streamlit. O Supabase Auth PROD já permite esse
+  destino e agora o usa como Site URL padrão; o domínio raiz continua permitido.
+  O smoke test sintético passou, mas ainda falta validar links reais de convite
+  e recuperação antes de convidar o cliente.
 - O identificador de sessão fica em cookie gerenciado pelo componente
   Streamlit; tokens Supabase são cifrados no Supabase. O cookie não é
   HttpOnly, uma limitação do componente, mas não conterá credenciais Supabase.
