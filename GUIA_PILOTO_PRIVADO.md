@@ -83,41 +83,40 @@ atender outro cliente.
 
 O acesso operacional continua restrito ao tenant ao qual cada conta está
 vinculada: owners administram o próprio tenant, mas não podem consultar dados
-de outros tenants. O painel registra ações administrativas no tenant, e a
-identidade global autorizada para aprovar onboarding não concede acesso
-cruzado aos dados operacionais. O primeiro piloto não exige esse acesso
-cruzado: o cliente deve operar seu próprio tenant. Qualquer futura função de
-administração entre tenants precisa de autorização explícita e auditoria
-própria. Não use chaves `service_role` no navegador ou na aplicação Streamlit
-para contornar o isolamento RLS.
+de outros tenants. O painel registra ações administrativas no tenant. A
+identidade global autorizada para provisionar contas não concede acesso
+cruzado aos dados operacionais; o cliente deve operar seu próprio tenant.
+Qualquer futura função de administração entre tenants precisa de autorização
+explícita e auditoria própria. Não use chaves `service_role` no navegador ou
+na aplicação Streamlit para contornar o isolamento RLS.
 
-### Fluxo de onboarding do piloto
+### Fluxo de convite e vínculo do piloto
 
-O processo de onboarding do piloto privado segue a seguinte sequência:
+O convite do Supabase Auth confirma a identidade; o vínculo em
+`tenant_members` autoriza o acesso aos dados. Para evitar uma etapa duplicada
+para o cliente, o responsável prepara esse vínculo antes de o cliente aceitar:
 
-1. O usuário autenticado, mas sem vínculo com tenant, entra na tela de acesso e
-   escolhe o fluxo de solicitação de onboarding.
-2. O app grava um evento de `pilot_onboarding_request` em
-   `tenant_access_audit` sem tenant associado, evitando a criação de acesso
-   irrestrito antes da aprovação.
-3. O administrador global do piloto acessa o painel e visualiza as solicitações
-   pendentes. A autorização fica explícita em `pilot_administrators`; ser owner
-   de um tenant, por si só, não concede visibilidade ou aprovação global.
-4. O administrador informa o nome do tenant e o papel do usuário (`member` ou
-   `owner`) e aprova a solicitação.
-5. O sistema cria o tenant, registra o vínculo em `tenant_members` e mantém a
-   auditoria da aprovação para rastreabilidade.
-6. Com o tenant vinculado, a sessão do usuário passa a ter acesso ao ambiente
-   isolado e aos dados do piloto de forma restrita ao tenant aprovado.
+1. Confirme a autorização do cliente e seu e-mail individual.
+2. Em Supabase Auth → Users, envie o convite para esse e-mail.
+3. Copie o User ID da conta criada e, no painel administrativo do app, prepare
+   o acesso com esse ID, o nome do tenant exclusivo e o papel apropriado.
+   Use `member` por padrão; `owner` somente quando o cliente precisar
+   administrar o próprio tenant.
+4. O banco verifica que a conta existe no Auth, que ainda não está vinculada a
+   outro tenant e que o operador é um administrador do piloto e owner do tenant
+   de auditoria. A criação do tenant, vínculo e auditoria é transacional.
+5. Depois de aceitar o convite e definir a senha, o cliente entra diretamente
+   no tenant já preparado. Não há solicitação de acesso dentro do app.
 
-O fluxo depende também da migração
-`supabase/migrations/20261005190000_pilot_onboarding_approval.sql`, que permite
-ao administrador explicitamente autorizado consultar pedidos pendentes e
-executa a aprovação em uma única transação no banco. A função valida o
-administrador, o owner do tenant de auditoria, a existência de um pedido
-pendente e a ausência de vínculo anterior antes de criar tenant, associação e
-evento de auditoria. A primeira conta administradora deve ser autorizada
-separadamente no Supabase pelo responsável do projeto.
+Se o cliente aceitar antes de o responsável preparar o vínculo, ele verá uma
+mensagem de acesso pendente; nenhum dado de tenant será liberado até a
+conclusão do provisionamento. A operação depende da migração
+`supabase/migrations/20261007125000_provision_invited_pilot_user.sql`. A
+primeira conta administradora continua sendo autorizada separadamente no
+Supabase pelo responsável do projeto. O evento antigo
+`pilot_onboarding_request` permanece no schema somente para compatibilidade com
+registros históricos; a migração remove a antiga função de aprovação e o fluxo
+atual não cria nem exige esses eventos.
 
 Mercado Livre e Shopee são possibilidades do produto, não pré-requisitos para
 o primeiro piloto: priorize o marketplace que o cliente escolhido realmente

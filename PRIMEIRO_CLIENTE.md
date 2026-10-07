@@ -11,9 +11,8 @@ Ele diferencia o que pode ser feito com o ambiente atual de desenvolvimento
   **DEV**, não um projeto de produção.
 - O cadastro público está desativado. Uma conta precisa ser criada ou
   convidada pelo responsável no Supabase Auth antes que o cliente possa entrar.
-- Depois do primeiro login, a conta sem tenant pode solicitar acesso. Um
-  administrador de piloto autorizado aprova a solicitação e cria o tenant
-  exclusivo.
+- O responsável deve vincular a conta convidada a um tenant exclusivo antes de
+  o cliente aceitar o convite. O app não oferece solicitação pública de acesso.
 - O OAuth do Mercado Livre está configurado apenas para `development` e para
   a aplicação/URI de retorno do DEV. A própria aplicação informa que a
   integração está disponível somente nesse ambiente até a configuração de uma
@@ -71,16 +70,16 @@ conclua os demais itens de segurança e isolamento abaixo.
 4. Envie ao cliente o endereço
    `https://marketplace-intelligence-dev.streamlit.app/` e as instruções para
    concluir o acesso à conta Supabase.
-5. Peça que ele entre no painel. Sem vínculo, o app deve apresentar o fluxo
-   para solicitar acesso ao piloto. Ele registra uma solicitação sem conceder
-   acesso a dados de tenant.
-6. No painel, aprove a solicitação somente se a conta, a autorização e o
-   cliente estiverem confirmados. Informe um nome identificável para o tenant
-   do cliente e o papel apropriado. Para a operação comum, conceda `member`;
-   conceda `owner` apenas se o cliente realmente precisar administrar membros
-   do próprio tenant.
-7. Confirme que a aprovação criou o tenant e o vínculo. Peça ao cliente que
-   atualize a página ou entre novamente e valide que chega à plataforma.
+5. Antes de o cliente aceitar, copie o User ID criado no Supabase Auth e use a
+   seção “Preparar acesso por convite” do painel administrativo. Crie um tenant
+   exclusivo e vincule a conta; use `member` por padrão e `owner` somente se o
+   cliente precisar administrar o próprio tenant.
+6. Confirme que o tenant e o vínculo foram criados. Depois, envie ao cliente o
+   endereço do app e peça que conclua o convite e entre. Após aceitar, ele deve
+   chegar diretamente ao tenant preparado.
+7. Se o cliente aceitar antes do provisionamento, o app informa que o acesso
+   está pendente e não mostra dados. Conclua o vínculo no painel e peça que
+   atualize a página.
 8. Com o cliente conectado, confira o isolamento do tenant antes de carregar
    qualquer dado. O acesso deve ficar limitado aos registros desse tenant pelas
    policies RLS.

@@ -12,6 +12,8 @@ from autenticacao import (
     _CHAVE_ID_SESSAO_PROD,
     _COOKIE_SESSAO,
     _COOKIE_SESSAO_PROD,
+    _TenantNaoVinculadoError,
+    _carregar_vinculo_tenant,
     _hash_id_sessao_prod,
     _ler_sessao_cookie,
     _limpar_sessao,
@@ -53,6 +55,16 @@ class _CookieManagerFake:
 
 
 class TestAuthSessionPersistence(unittest.TestCase):
+    def test_conta_sem_vinculo_fica_em_espera_de_provisionamento(self) -> None:
+        cliente = Mock()
+        cliente.table.return_value.select.return_value.execute.return_value.data = []
+
+        with self.assertRaisesRegex(
+            _TenantNaoVinculadoError,
+            "não está vinculada a um tenant autorizado",
+        ):
+            _carregar_vinculo_tenant(cliente)
+
     def test_redirect_de_senha_usa_url_fixa_por_ambiente(self) -> None:
         self.assertEqual(
             _url_redirecionamento_autenticacao("production"),

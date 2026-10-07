@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import re
+import uuid
 from typing import Any
 
 import pandas as pd
@@ -53,109 +53,33 @@ def eh_administrador_piloto() -> bool:
 
 
 def exigir_administrador_piloto() -> None:
-    """Bloqueia a gestão global de onboarding a contas explicitamente autorizadas."""
+    """Permite provisionar contas somente a administradores autorizados."""
     if not eh_administrador_piloto():
         raise RuntimeError(
-            "A aprovação global de onboarding é restrita ao administrador "
+            "O provisionamento de contas é restrito ao administrador "
             "explicitamente autorizado do piloto."
         )
 
 
-def solicitar_onboarding_piloto(*, motivo: str = "") -> dict[str, Any]:
-    """Registra a solicitação de acesso ao piloto privado para a conta."""
-    usuario_id = st.session_state.get("_mi_supabase_user_id")
-    if not usuario_id:
-        raise RuntimeError(
-            "A identidade autenticada não está disponível para registrar o "
-            "onboarding do piloto privado. Entre novamente."
-        )
-
-    if st.session_state.get("_mi_tenant_id"):
-        return {
-            "status": "already_linked",
-            "tenant_id": str(st.session_state["_mi_tenant_id"]),
-        }
-
-    cliente = obter_cliente_supabase()
-    try:
-        resposta = (
-            cliente.table("tenant_access_audit")
-            .select("*")
-            .eq("actor_user_id", str(usuario_id))
-            .eq("action", "pilot_onboarding_request")
-            .is_("actor_tenant_id", "null")
-            .is_("target_tenant_id", "null")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-    except APIError as erro:
-        raise RuntimeError(
-            "Não foi possível verificar se já existe uma solicitação pendente "
-            f"de onboarding: {erro.message}"
-        ) from erro
-    linhas = resposta.data or []
-    if linhas:
-        return linhas[0]
-
-    payload = {
-        "actor_user_id": str(usuario_id),
-        "actor_tenant_id": None,
-        "action": "pilot_onboarding_request",
-        "target_tenant_id": None,
-        "reason": (str(motivo) or "Solicitação de acesso ao piloto privado").strip(),
-    }
-    try:
-        resposta = cliente.table("tenant_access_audit").insert(payload).execute()
-    except APIError as erro:
-        raise RuntimeError(
-            "Não foi possível registrar a solicitação de onboarding: "
-            f"{erro.message}"
-        ) from erro
-    linhas = resposta.data or []
-    if not linhas:
-        raise RuntimeError(
-            "O banco não confirmou o registro da solicitação de onboarding."
-        )
-    return linhas[0]
-
-
-def listar_solicitacoes_piloto_pendentes() -> list[dict[str, Any]]:
-    """Lista pedidos de onboarding ainda sem tenant vinculado."""
-    exigir_administrador_piloto()
-    cliente = obter_cliente_supabase()
-    try:
-        resposta = (
-            cliente.table("tenant_access_audit")
-            .select("*")
-            .eq("action", "pilot_onboarding_request")
-            .is_("actor_tenant_id", "null")
-            .is_("target_tenant_id", "null")
-            .order("created_at", desc=True)
-            .execute()
-        )
-    except APIError as erro:
-        raise RuntimeError(
-            "Não foi possível carregar as solicitações pendentes de "
-            f"onboarding: {erro.message}"
-        ) from erro
-    return resposta.data or []
-
-
-def aprovar_onboarding_piloto(
+def vincular_usuario_convidado_piloto(
     *,
     user_id: str,
     nome_tenant: str,
     papel: str = "member",
-    tenant_id: str | None = None,
 ) -> dict[str, Any]:
-    """Aprova a solicitação por meio da operação transacional do banco."""
+    """Vincula ao tenant uma conta já criada no Supabase Auth."""
     exigir_administrador_piloto()
 
     if not user_id:
-        raise RuntimeError("É obrigatório informar o identificador do usuário.")
+        raise RuntimeError("É obrigatório informar o ID da conta convidada.")
     if papel not in {"owner", "member"}:
         raise RuntimeError("O papel do usuário deve ser 'owner' ou 'member'.")
+    try:
+        user_id = str(uuid.UUID(user_id.strip()))
+    except (AttributeError, ValueError) as erro:
+        raise RuntimeError(
+            "Informe um ID de usuário válido, copiado do Supabase Auth."
+        ) from erro
 
     nome = (str(nome_tenant or "")).strip()
     if not nome:
@@ -164,18 +88,17 @@ def aprovar_onboarding_piloto(
     cliente = obter_cliente_supabase()
     try:
         resposta = cliente.rpc(
-            "approve_pilot_onboarding",
+            "provision_pilot_user",
             {
                 "p_user_id": str(user_id),
                 "p_tenant_name": nome,
                 "p_role": papel,
                 "p_actor_tenant_id": obter_tenant_id(),
-                "p_target_tenant_id": tenant_id,
             },
         ).execute()
     except APIError as erro:
         raise RuntimeError(
-            "Não foi possível aprovar o onboarding do piloto: "
+            "Não foi possível vincular a conta convidada ao tenant: "
             f"{erro.message}"
         ) from erro
 
@@ -184,43 +107,22 @@ def aprovar_onboarding_piloto(
         resultado = resultado[0]
     if not isinstance(resultado, dict):
         raise RuntimeError(
-            "O banco não confirmou a aprovação do onboarding do piloto."
+            "O banco não confirmou o vínculo da conta convidada."
         )
     return resultado
 
 
-def mostrar_fluxo_onboarding_piloto() -> None:
-    """Exibe o fluxo de onboarding para usuários autenticados sem tenant."""
+def mostrar_acesso_piloto_pendente() -> None:
+    """Informa que a conta autenticada ainda aguarda vínculo administrativo."""
     st.subheader("Piloto privado")
     st.info(
-        "Sua conta está autenticada, mas ainda não foi vinculada a um tenant "
-        "do piloto. Solicite o acesso para receber o vínculo e as permissões "
-        "do ambiente de testes."
+        "Sua conta está autenticada, mas o responsável pelo piloto ainda "
+        "precisa vinculá-la ao tenant correto."
     )
     st.caption(
-        "Próximo passo: registrar sua solicitação e aguardar aprovação do "
-        "responsável pelo produto."
+        "O convite do Supabase confirma sua identidade; o acesso aos dados só "
+        "é liberado depois que o responsável conclui esse vínculo."
     )
-
-    with st.form("mi_pilot_onboarding_form"):
-        motivo = st.text_area(
-            "Descreva o objetivo do acesso ao piloto",
-            value="Solicito acesso ao piloto privado para validar o ambiente e as integrações.",
-            height=120,
-        )
-        enviado = st.form_submit_button("Solicitar acesso ao piloto", type="primary")
-
-    if enviado:
-        try:
-            resultado = solicitar_onboarding_piloto(motivo=motivo)
-        except RuntimeError as erro:
-            st.error(str(erro))
-            return
-        st.success(
-            "Solicitação registrada com sucesso. O responsável pelo produto "
-            "poderá aprovar o vínculo do seu tenant e liberar o acesso."
-        )
-        st.caption(f"Registro de acesso: {resultado.get('action', 'pilot_onboarding_request')}")
 
 
 def exigir_permissao_admin_tenant() -> None:
@@ -302,15 +204,15 @@ def mostrar_painel_administracao() -> None:
         )
         st.stop()
 
-    aprovacao_concluida = st.session_state.pop(
-        "_mi_onboarding_aprovado",
+    vinculacao_concluida = st.session_state.pop(
+        "_mi_usuario_piloto_vinculado",
         None,
     )
-    if isinstance(aprovacao_concluida, dict):
-        st.success("Usuário aprovado e vinculado ao tenant do piloto.")
+    if isinstance(vinculacao_concluida, dict):
+        st.success("Conta convidada vinculada ao tenant do piloto.")
         st.caption(
-            f"Tenant: {aprovacao_concluida.get('tenant_id', '')} · "
-            f"Papel: {aprovacao_concluida.get('role', '')}"
+            f"Tenant: {vinculacao_concluida.get('tenant_id', '')} · "
+            f"Papel: {vinculacao_concluida.get('role', '')}"
         )
 
     tenant_id = obter_tenant_id()
@@ -321,54 +223,52 @@ def mostrar_painel_administracao() -> None:
     except RuntimeError as erro:
         st.error(str(erro))
         st.stop()
-    solicitacoes_pendentes = (
-        listar_solicitacoes_piloto_pendentes()
-        if administrador_piloto
-        else []
-    )
-
     st.caption(f"Tenant atual: {tenant_id}")
     st.info(
         "Acesso administrativo foi reforçado para owner do tenant e toda ação "
         "de gestão fica registrada em auditoria para acompanhamento futuro."
     )
 
-    st.markdown("### Solicitações de onboarding do piloto")
+    st.markdown("### Preparar acesso por convite")
     if not administrador_piloto:
         st.info(
-            "A visualização e aprovação global de pedidos de onboarding estão "
-            "restritas ao administrador autorizado do piloto."
+            "A preparação de contas convidadas é restrita ao administrador "
+            "autorizado do piloto."
         )
-    elif solicitacoes_pendentes:
-        for solicitacao in solicitacoes_pendentes:
-            user_id = str(solicitacao.get("actor_user_id") or "")
-            nome_tenant = f"Tenant do piloto {user_id[:8]}"
-            with st.expander(f"Solicitação de {user_id[:8]}"):
-                st.write(solicitacao.get("reason") or "Sem motivo informado.")
-                nome_tenant = st.text_input(
-                    "Nome do tenant para aprovar",
-                    value=nome_tenant,
-                    key=f"tenant_name_{user_id}",
-                )
-                papel = st.selectbox(
-                    "Papel do usuário no tenant",
-                    ["member", "owner"],
-                    key=f"tenant_role_{user_id}",
-                )
-                if st.button("Aprovar onboarding", key=f"approve_{user_id}"):
-                    try:
-                        resultado = aprovar_onboarding_piloto(
-                            user_id=user_id,
-                            nome_tenant=nome_tenant,
-                            papel=papel,
-                        )
-                    except RuntimeError as erro:
-                        st.error(str(erro))
-                    else:
-                        st.session_state["_mi_onboarding_aprovado"] = resultado
-                        st.rerun()
     else:
-        st.write("Nenhuma solicitação pendente de onboarding do piloto.")
+        st.caption(
+            "No Supabase Auth, convide primeiro o e-mail individual autorizado. "
+            "Copie o User ID da conta criada e faça o vínculo aqui antes de o "
+            "cliente aceitar o convite."
+        )
+        st.caption(
+            "O vínculo cria um tenant exclusivo. O aceite do convite libera o "
+            "login nesse tenant, sem uma segunda solicitação de acesso."
+        )
+        with st.form("mi_pilot_invited_user_form"):
+            user_id = st.text_input("User ID da conta no Supabase Auth")
+            nome_tenant = st.text_input("Nome do tenant do cliente")
+            papel = st.selectbox(
+                "Papel no tenant",
+                ["member", "owner"],
+                help="Use member por padrão; owner só se o cliente precisar administrar o tenant.",
+            )
+            vincular = st.form_submit_button(
+                "Vincular conta e criar tenant",
+                type="primary",
+            )
+        if vincular:
+            try:
+                resultado = vincular_usuario_convidado_piloto(
+                    user_id=user_id,
+                    nome_tenant=nome_tenant,
+                    papel=papel,
+                )
+            except RuntimeError as erro:
+                st.error(str(erro))
+            else:
+                st.session_state["_mi_usuario_piloto_vinculado"] = resultado
+                st.rerun()
 
     st.markdown("### Membros do tenant")
     if membros:

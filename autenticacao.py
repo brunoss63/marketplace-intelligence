@@ -734,6 +734,10 @@ def exigir_permissao_administrativa() -> None:
         )
 
 
+class _TenantNaoVinculadoError(RuntimeError):
+    """Indica que a conta autenticada ainda não recebeu um tenant."""
+
+
 def _carregar_vinculo_tenant(cliente: Client) -> tuple[str, str]:
     """Lê o tenant e o papel do usuário autenticado, sem usar service_role."""
     try:
@@ -751,9 +755,8 @@ def _carregar_vinculo_tenant(cliente: Client) -> tuple[str, str]:
         ) from erro
 
     if not memberships:
-        raise RuntimeError(
-            "Esta conta ainda não está vinculada a um tenant do piloto. "
-            "Use o fluxo de onboarding para solicitar acesso."
+        raise _TenantNaoVinculadoError(
+            "Esta conta ainda não está vinculada a um tenant autorizado."
         )
     if len(memberships) != 1:
         raise RuntimeError(
@@ -922,10 +925,16 @@ def exigir_autenticacao() -> None:
                     st.stop()
                 try:
                     tenant_id, tenant_role = _carregar_vinculo_tenant(cliente)
+                except _TenantNaoVinculadoError:
+                    from administracao import mostrar_acesso_piloto_pendente
+                    mostrar_acesso_piloto_pendente()
+                    if st.button("Sair", key="mi_logout_unlinked"):
+                        cliente.auth.sign_out()
+                        _limpar_sessao()
+                        st.rerun()
+                    st.stop()
                 except RuntimeError as erro:
                     st.error(str(erro))
-                    from administracao import mostrar_fluxo_onboarding_piloto
-                    mostrar_fluxo_onboarding_piloto()
                     if st.button("Sair", key="mi_logout_unlinked"):
                         cliente.auth.sign_out()
                         _limpar_sessao()
