@@ -15,7 +15,7 @@ from postgrest.exceptions import APIError
 from supabase import Client, create_client
 from supabase_auth.errors import AuthApiError
 
-from componentes import renderizar_painel_login
+from componentes import renderizar_aviso_login, renderizar_painel_login
 
 
 _logger = logging.getLogger(__name__)
@@ -31,6 +31,8 @@ _CHAVES_SESSAO = (
     "_mi_supabase_client",
     "_mi_tenant_id",
     "_mi_tenant_role",
+    "_mi_login_intro_shown",
+    "_mi_login_notice",
     _CHAVE_ID_SESSAO_PROD,
     _CHAVE_COOKIE_PROD_LIMPO,
     _CHAVE_CONFIG_AUTH_LOGADO,
@@ -572,7 +574,17 @@ def _renderizar_login(
     cookie_manager: stx.CookieManager,
     ambiente: str,
 ) -> None:
-    st.markdown('<div class="mi-login-layout"></div>', unsafe_allow_html=True)
+    animar_entrada = not st.session_state.get("_mi_login_intro_shown", False)
+    st.session_state["_mi_login_intro_shown"] = True
+    classe_login = (
+        "mi-login-layout mi-login-intro-once"
+        if animar_entrada
+        else "mi-login-layout"
+    )
+    st.markdown(
+        f'<div class="{classe_login}"></div>',
+        unsafe_allow_html=True,
+    )
     painel, formulario = st.columns([1.05, .95], gap="large")
 
     with painel:
@@ -580,6 +592,8 @@ def _renderizar_login(
 
     with formulario:
         with st.container(key="mi-login-card"):
+            if aviso_login := st.session_state.pop("_mi_login_notice", None):
+                renderizar_aviso_login(aviso_login)
             st.markdown(
                 """
                 <div class="mi-login-card-heading">
@@ -609,6 +623,7 @@ def _renderizar_login(
                     "Entrar no painel",
                     type="primary",
                     icon=":material/arrow_forward:",
+                    key="mi_login_submit",
                 )
 
             with st.form("mi_password_recovery_form"):
@@ -620,6 +635,7 @@ def _renderizar_login(
                 ).strip()
                 solicitar_recuperacao = st.form_submit_button(
                     "Enviar link para definir nova senha",
+                    key="mi_password_recovery_submit",
                 )
 
             if solicitar_recuperacao:
@@ -882,7 +898,9 @@ def exigir_autenticacao() -> None:
             )
         except AuthApiError:
             _limpar_sessao()
-            st.warning("Sua sessão expirou. Entre novamente.")
+            st.session_state["_mi_login_notice"] = (
+                "Sua sessão expirou. Entre novamente para continuar."
+            )
         else:
             if sessao is not None and usuario is not None:
                 st.session_state["_mi_supabase_access_token"] = (

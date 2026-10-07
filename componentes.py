@@ -108,12 +108,20 @@ def renderizar_card_participacao_canal(
         valor_html = (
             escape(linha.valor)
             if linha.em_breve or not classe_entrada
-            else _html_valor_animado(linha.valor, atraso)
+            else _html_valor_animado(
+                linha.valor,
+                atraso,
+                iniciar_oculto=bool(classe_entrada),
+            )
         )
         participacao_html = (
             escape(percentual_texto)
             if linha.em_breve or not classe_entrada
-            else _html_valor_animado(percentual_texto, atraso)
+            else _html_valor_animado(
+                percentual_texto,
+                atraso,
+                iniciar_oculto=bool(classe_entrada),
+            )
         )
         largura = (
             min(max(percentual or 0.0, 0.0), 100.0)
@@ -1042,10 +1050,18 @@ def renderizar_painel_login() -> None:
     )
 
 
+def renderizar_aviso_login(mensagem: str) -> None:
+    st.markdown(
+        '<div class="mi-login-notice" role="status">'
+        '<span class="mi-login-notice-title">Sessão encerrada</span>'
+        f"<span>{escape(mensagem)}</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def renderizar_perfil_sidebar(
     nome: str,
-    email: str,
-    papel: str,
     *,
     container=None,
 ) -> bool:
@@ -1053,47 +1069,37 @@ def renderizar_perfil_sidebar(
     iniciais = "".join(
         parte[0] for parte in nome.split()[:2] if parte
     ).upper() or "?"
-    papel_legivel = "Owner" if papel == "owner" else "Membro"
 
-    logout = False
     destino = container if container is not None else st.sidebar
     with destino.container(key="mi-sidebar-account"):
-        perfil, menu = st.columns([5, 1], vertical_alignment="center")
+        avatar, perfil = st.columns([0.8, 4.2], vertical_alignment="top")
+        with avatar:
+            st.markdown(
+                f"""
+                <span class="mi-sidebar-avatar">{escape(iniciais)}</span>
+                """,
+                unsafe_allow_html=True
+            )
         with perfil:
             st.markdown(
                 f"""
-                <div class="mi-sidebar-user">
-                    <span class="mi-sidebar-avatar">{escape(iniciais)}</span>
-                    <span class="mi-sidebar-user-copy">
-                        <span class="mi-sidebar-user-name">{nome_seguro}</span>
-                        <span class="mi-sidebar-account-active">
-                            <span></span>Conta ativa
-                        </span>
+                <div class="mi-sidebar-user-copy">
+                    <span class="mi-sidebar-user-name">{nome_seguro}</span>
+                    <span class="mi-sidebar-account-active">
+                        <span></span>Conta ativa
                     </span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
-        with menu:
-            with st.popover(
-                "⋯",
+            logout = st.button(
+                "Sair",
+                icon=":material/logout:",
+                key="mi_logout_sidebar",
                 type="tertiary",
-                help="Detalhes da conta",
-                key="mi-account-menu",
+                help="Encerrar sessão",
                 width="content",
-            ):
-                st.markdown(f"**{nome_seguro}**")
-                st.caption(email)
-                st.caption(f"Perfil: {papel_legivel}")
-                st.markdown('<div class="mi-account-menu-divider"></div>',
-                            unsafe_allow_html=True)
-                logout = st.button(
-                    "Sair",
-                    icon=":material/logout:",
-                    key="mi_logout_menu",
-                    type="tertiary",
-                    use_container_width=True,
-                )
+            )
 
     return logout
 
@@ -1509,7 +1515,12 @@ def proxima_animacao_entrada_pagina() -> tuple[str, int]:
     return "mi-entry-card", indice * 55
 
 
-def _html_valor_animado(valor: str, atraso: int) -> str:
+def _html_valor_animado(
+    valor: str,
+    atraso: int,
+    *,
+    iniciar_oculto: bool = False,
+) -> str:
     texto = str(valor)
     correspondencia = re.search(r"[-+]?\d[\d.,]*", texto)
     if correspondencia is None:
@@ -1533,6 +1544,9 @@ def _html_valor_animado(valor: str, atraso: int) -> str:
     sufixo = texto[correspondencia.end():]
     prefixo = prefixo.replace(" ", "\u00a0")
     final_seguro = escape(texto)
+    estilo_inicial = (
+        ' style="visibility:hidden"' if iniciar_oculto else ""
+    )
     return (
         f'<span class="mi-count-value" '
         f'data-mi-final="{final_seguro}" '
@@ -1540,7 +1554,7 @@ def _html_valor_animado(valor: str, atraso: int) -> str:
         f'data-mi-decimals="{casas_decimais}" '
         f'data-mi-prefix="{escape(prefixo)}" '
         f'data-mi-suffix="{escape(sufixo)}" '
-        f'data-mi-delay="{atraso}">'
+        f'data-mi-delay="{atraso}"{estilo_inicial}>'
         f"{final_seguro}</span>"
         '<span class="mi-count-final" aria-hidden="true" '
         'style="display:none!important">'
@@ -1596,6 +1610,13 @@ def renderizar_animacoes_entrada_pagina() -> None:
             .mi-count-final {
                 font-variant-numeric: tabular-nums;
             }
+            @media (prefers-reduced-motion: no-preference) {
+                [data-testid="stVerticalBlockBorderWrapper"]:has(
+                    .mi-entry-chart
+                ) .js-plotly-plot {
+                    visibility: hidden;
+                }
+            }
             @media (prefers-reduced-motion: reduce) {
                 .mi-entry-card,
                 .mi-entry-chart {
@@ -1611,9 +1632,19 @@ def renderizar_animacoes_entrada_pagina() -> None:
         </style>
         <script>
             (() => {
+                if (window.__miEntryAnimationsInitialized) return;
+                window.__miEntryAnimationsInitialized = true;
+
+                const main = document.querySelector(
+                    '[data-testid="stMain"]'
+                ) || document.body;
                 const reduzido = window.matchMedia(
                     '(prefers-reduced-motion: reduce)'
                 ).matches;
+                const valoresAnimados = new WeakSet();
+                const graficosAnimados = new WeakSet();
+                const graficosAguardando = new WeakSet();
+                const tentativasGrafico = new WeakMap();
                 const formatar = (elemento, numero) => {
                     const casas = Number(elemento.dataset.miDecimals || 0);
                     const formato = new Intl.NumberFormat('pt-BR', {
@@ -1625,10 +1656,16 @@ def renderizar_animacoes_entrada_pagina() -> None:
                         + (elemento.dataset.miSuffix || '');
                 };
 
-                document.querySelectorAll('.mi-count-value').forEach(elemento => {
+                const animarValor = elemento => {
+                    if (
+                        valoresAnimados.has(elemento)
+                        || !elemento.closest('.mi-entry-card')
+                    ) return;
+                    valoresAnimados.add(elemento);
                     const final = elemento.dataset.miFinal;
                     if (reduzido) {
                         elemento.textContent = final;
+                        elemento.style.visibility = 'visible';
                         return;
                     }
                     try {
@@ -1636,6 +1673,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                         const atraso = Number(elemento.dataset.miDelay || 0);
                         if (!Number.isFinite(alvo)) {
                             elemento.textContent = final;
+                            elemento.style.visibility = 'visible';
                             return;
                         }
                         window.setTimeout(() => {
@@ -1656,34 +1694,62 @@ def renderizar_animacoes_entrada_pagina() -> None:
                                                 elemento,
                                                 alvo * desaceleracao
                                             );
+                                        elemento.style.visibility = 'visible';
                                         if (progresso < 1) {
                                             window.requestAnimationFrame(quadro);
                                         }
                                     } catch (_) {
                                         elemento.textContent = final;
+                                        elemento.style.visibility = 'visible';
                                     }
                                 };
                                 elemento.textContent = formatar(elemento, 0);
+                                elemento.style.visibility = 'visible';
                                 window.requestAnimationFrame(quadro);
                             } catch (_) {
                                 elemento.textContent = final;
+                                elemento.style.visibility = 'visible';
                             }
                         }, atraso);
                     } catch (_) {
                         elemento.textContent = final;
+                        elemento.style.visibility = 'visible';
                     }
-                });
+                };
 
-                if (reduzido) return;
-                const titulos = [
-                    ...document.querySelectorAll('.mi-entry-chart')
-                ];
-                const animados = new WeakSet();
-                let tentativas = 0;
+                const agendarTentativaGrafico = titulo => {
+                    if (graficosAguardando.has(titulo)) return;
+                    graficosAguardando.add(titulo);
+                    window.setTimeout(() => {
+                        graficosAguardando.delete(titulo);
+                        const tentativas = (
+                            tentativasGrafico.get(titulo) || 0
+                        ) + 1;
+                        tentativasGrafico.set(titulo, tentativas);
+                        if (tentativas >= 30) {
+                            const bloco = titulo.closest(
+                                '[data-testid="stVerticalBlockBorderWrapper"]'
+                            ) || titulo.closest(
+                                '[data-testid="stVerticalBlock"]'
+                            );
+                            const grafico = bloco?.querySelector(
+                                '.js-plotly-plot'
+                            );
+                            if (grafico) {
+                                grafico.style.visibility = 'visible';
+                                graficosAnimados.add(titulo);
+                            }
+                            return;
+                        }
+                        animarGraficos();
+                    }, 100);
+                };
+
                 const animarGraficos = () => {
-                    let pendentes = 0;
-                    for (const titulo of titulos) {
-                        if (animados.has(titulo)) continue;
+                    for (const titulo of main.querySelectorAll(
+                        '.mi-entry-chart'
+                    )) {
+                        if (reduzido || graficosAnimados.has(titulo)) continue;
                         const bloco = titulo.closest(
                             '[data-testid="stVerticalBlockBorderWrapper"]'
                         ) || titulo.closest('[data-testid="stVerticalBlock"]');
@@ -1694,6 +1760,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                             ) || [])
                         ];
                         if (barras.length) {
+                            grafico.style.visibility = 'visible';
                             barras.forEach((barra, indice) => {
                                 barra.style.transformBox = 'fill-box';
                                 barra.style.transformOrigin = 'center bottom';
@@ -1712,7 +1779,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                                 entradaBarra.onfinish = () =>
                                     entradaBarra.cancel();
                             });
-                            animados.add(titulo);
+                            graficosAnimados.add(titulo);
                             continue;
                         }
                         const fatias = [
@@ -1721,6 +1788,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                             ) || [])
                         ];
                         if (fatias.length) {
+                            grafico.style.visibility = 'visible';
                             fatias.forEach((fatia, indice) => {
                                 fatia.style.transformBox = 'fill-box';
                                 fatia.style.transformOrigin = 'center';
@@ -1745,7 +1813,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                                 entradaFatia.onfinish = () =>
                                     entradaFatia.cancel();
                             });
-                            animados.add(titulo);
+                            graficosAnimados.add(titulo);
                             continue;
                         }
                         const serie = grafico?.querySelector(
@@ -1753,15 +1821,18 @@ def renderizar_animacoes_entrada_pagina() -> None:
                         );
                         const linha = serie?.querySelector('.js-line');
                         if (!linha || typeof linha.getTotalLength !== 'function') {
-                            pendentes += 1;
+                            if (grafico) {
+                                agendarTentativaGrafico(titulo);
+                            }
                             continue;
                         }
                         try {
                             const comprimento = linha.getTotalLength();
                             if (!Number.isFinite(comprimento) || comprimento <= 0) {
-                                pendentes += 1;
+                                agendarTentativaGrafico(titulo);
                                 continue;
                             }
+                            grafico.style.visibility = 'visible';
                             const preenchimento = serie.querySelector('.js-fill');
                             const pontos = [...serie.querySelectorAll('.point')];
                             linha.style.strokeDasharray =
@@ -1807,7 +1878,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                                 );
                                 entradaPonto.onfinish = () => entradaPonto.cancel();
                             });
-                            animados.add(titulo);
+                            graficosAnimados.add(titulo);
                         } catch (_) {
                             linha.style.strokeDasharray = '';
                             linha.style.strokeDashoffset = '';
@@ -1817,15 +1888,23 @@ def renderizar_animacoes_entrada_pagina() -> None:
                             serie.querySelectorAll('.js-fill').forEach(area => {
                                 area.style.opacity = '';
                             });
-                            animados.add(titulo);
+                            grafico.style.visibility = 'visible';
+                            graficosAnimados.add(titulo);
                         }
                     }
-                    tentativas += 1;
-                    if (pendentes > 0 && tentativas < 30) {
-                        window.setTimeout(animarGraficos, 100);
-                    }
                 };
-                if (titulos.length) window.setTimeout(animarGraficos, 80);
+
+                const processarElementos = () => {
+                    main.querySelectorAll('.mi-count-value').forEach(
+                        animarValor
+                    );
+                    animarGraficos();
+                };
+                processarElementos();
+                new MutationObserver(processarElementos).observe(main, {
+                    childList: true,
+                    subtree: true
+                });
             })();
         </script>
         """,
@@ -1847,7 +1926,11 @@ def renderizar_card_insight(
 
     classe_entrada, atraso = proxima_animacao_entrada_pagina()
     valor_html = (
-        _html_valor_animado(valor, atraso)
+        _html_valor_animado(
+            valor,
+            atraso,
+            iniciar_oculto=bool(classe_entrada),
+        )
         if st.session_state.get("_mi_active_page")
         in {
             "visao_geral",
@@ -2016,7 +2099,11 @@ def card(
 
     classe_entrada, atraso = proxima_animacao_entrada_pagina()
     valor_html = (
-        _html_valor_animado(valor, atraso)
+        _html_valor_animado(
+            valor,
+            atraso,
+            iniciar_oculto=bool(classe_entrada),
+        )
         if st.session_state.get("_mi_active_page")
         in {"visao_geral", "vendas_pedidos", "produtos_estoque"}
         else valor
@@ -3038,49 +3125,29 @@ def animar_pagina(nome):
     st.session_state["_mi_chart_animation_index"] = 0
     if entrou_na_pagina:
         st.session_state["_mi_page_entry_index"] = 0
-
-    if entrou_na_pagina:
         st.html(
-            f"""
-        <style>
-
-        @keyframes mi-page-enter-{nome} {{
-
-            from {{
-                opacity: 0;
-                transform:
-                    translateY(10px);
-            }}
-
-            to {{
-                opacity: 1;
-                transform:
-                    translateY(0);
-            }}
-
-        }}
-
-        .stAppViewContainer {{
-
-            animation:
-                mi-page-enter-{nome}
-                280ms
-                cubic-bezier(.22,.61,.36,1)
-                both;
-
-        }}
-
-        @media (prefers-reduced-motion: reduce) {{
-            .stAppViewContainer {{
-                animation: mi-page-fade 180ms ease-out both;
-            }}
-        }}
-        @keyframes mi-page-fade {{
-            from {{ opacity: 0; }}
-            to {{ opacity: 1; }}
-        }}
-        </style>
-        """,
+            """
+            <style>
+                @keyframes mi-page-content-enter {
+                    from {
+                        opacity: 0;
+                        transform: translateY(5px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+                .st-key-mi-page-content {
+                    animation: mi-page-content-enter 180ms ease-out both;
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    .st-key-mi-page-content {
+                        animation: none;
+                    }
+                }
+            </style>
+            """
         )
 
 
@@ -3548,12 +3615,6 @@ def aplicar_estilo():
             to { transform: translateX(100%); }
         }
 
-        .mi-account-menu-divider {
-            height: 1px;
-            margin: 8px 0;
-            background: var(--mi-color-border);
-        }
-
         @media (prefers-reduced-motion: reduce) {
             .mi-skeleton::after {
                 animation: none;
@@ -3569,19 +3630,19 @@ def aplicar_estilo():
             min-height: 100vh;
             flex-direction: column;
             justify-content: center;
-            padding: clamp(20px, 5vh, 54px) clamp(20px, 7vw, 100px);
+            padding: clamp(20px, 4vh, 42px) clamp(20px, 6vw, 88px);
         }
 
         .mi-login-layout {
             width: 100%;
-            max-width: 980px;
+            max-width: 1040px;
             height: 0;
             margin: 0 auto;
         }
 
         .stApp:has(.mi-login-layout) [data-testid="stHorizontalBlock"] {
             width: 100%;
-            max-width: 980px;
+            max-width: 1040px;
             align-items: stretch;
             gap: clamp(20px, 5vw, 68px);
             margin: 0 auto;
@@ -3589,12 +3650,14 @@ def aplicar_estilo():
 
         .mi-login-story {
             position: relative;
+            isolation: isolate;
             display: flex;
-            min-height: 470px;
+            min-height: 560px;
             overflow: hidden;
             flex-direction: column;
-            justify-content: space-between;
-            padding: clamp(26px, 4vw, 48px);
+            justify-content: flex-start;
+            gap: clamp(42px, 7vh, 60px);
+            padding: clamp(26px, 3.5vw, 42px);
             border: 1px solid rgba(115, 169, 255, .18);
             border-radius: 24px;
             background:
@@ -3607,7 +3670,74 @@ def aplicar_estilo():
             box-shadow:
                 0 28px 70px rgba(0, 0, 0, .28),
                 inset 0 1px 0 rgba(255, 255, 255, .04);
-            animation: mi-login-rise 560ms cubic-bezier(.22,.61,.36,1) both;
+        }
+
+        .mi-login-story::before {
+            position: absolute;
+            z-index: 0;
+            top: -18%;
+            left: -16%;
+            width: 112%;
+            height: 108%;
+            border-radius: 42%;
+            background:
+                radial-gradient(ellipse at 35% 35%,
+                    rgba(66, 142, 255, .58) 0%,
+                    rgba(66, 142, 255, .2) 28%,
+                    transparent 62%),
+                radial-gradient(ellipse at 70% 55%,
+                    rgba(58, 205, 220, .38) 0%,
+                    rgba(58, 205, 220, .13) 31%,
+                    transparent 66%),
+                radial-gradient(ellipse at 54% 80%,
+                    rgba(137, 104, 255, .3) 0%,
+                    transparent 55%);
+            content: "";
+            filter: blur(32px) saturate(1.2);
+            opacity: .9;
+            pointer-events: none;
+            animation: mi-login-smoke-drift 11s ease-in-out infinite alternate;
+        }
+
+        .mi-login-story::after {
+            position: absolute;
+            z-index: 0;
+            top: 8%;
+            left: 25%;
+            width: 90%;
+            height: 78%;
+            border-radius: 48%;
+            background:
+                radial-gradient(ellipse at 40% 40%,
+                    rgba(101, 172, 255, .34) 0%,
+                    transparent 58%),
+                radial-gradient(ellipse at 75% 65%,
+                    rgba(74, 219, 201, .27) 0%,
+                    transparent 55%);
+            content: "";
+            filter: blur(42px) saturate(1.25);
+            opacity: .74;
+            pointer-events: none;
+            animation: mi-login-smoke-bloom 15s ease-in-out infinite alternate;
+        }
+
+        @keyframes mi-login-smoke-drift {
+            0% { transform: translate(-8%, -7%) rotate(-8deg) scale(.88, .92); }
+            50% { transform: translate(8%, 3%) rotate(5deg) scale(1.05, 1.1); }
+            100% { transform: translate(2%, 12%) rotate(-3deg) scale(.98, 1.04); }
+        }
+
+        @keyframes mi-login-smoke-bloom {
+            from { transform: translate(12%, -8%) rotate(12deg) scale(.82); }
+            to { transform: translate(-12%, 14%) rotate(-9deg) scale(1.16); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .mi-login-story::before,
+            .mi-login-story::after {
+                animation: none;
+                transform: translate(3%, 4%);
+            }
         }
 
         .mi-login-story-brand {
@@ -3667,6 +3797,7 @@ def aplicar_estilo():
             display: inline-flex;
             align-items: center;
             gap: 9px;
+            margin-top: auto;
             color: #A5B5CA;
             font-size: 12px;
         }
@@ -3697,12 +3828,11 @@ def aplicar_estilo():
             height: 390px;
         }
 
-        .st-key-mi-login-card {
-            display: flex;
-            min-height: 470px;
-            flex-direction: column;
-            justify-content: center;
-            padding: clamp(12px, 2vw, 28px);
+        .stApp:has(.mi-login-intro-once) .mi-login-story {
+            animation: mi-login-rise 560ms cubic-bezier(.22,.61,.36,1) both;
+        }
+
+        .stApp:has(.mi-login-intro-once) .st-key-mi-login-card {
             animation: mi-login-rise 560ms 120ms
                 cubic-bezier(.22,.61,.36,1) both;
         }
@@ -3713,18 +3843,18 @@ def aplicar_estilo():
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .mi-login-story {
-                animation: mi-login-fade 180ms ease-out both;
-            }
-
-            .st-key-mi-login-card {
-                animation: mi-login-fade 180ms 60ms ease-out both;
+            .stApp:has(.mi-login-intro-once) .mi-login-story,
+            .stApp:has(.mi-login-intro-once) .st-key-mi-login-card {
+                animation: none;
             }
         }
 
-        @keyframes mi-login-fade {
-            from { opacity: 0; }
-            to { opacity: 1; }
+        .st-key-mi-login-card {
+            display: flex;
+            min-height: 560px;
+            flex-direction: column;
+            justify-content: center;
+            padding: clamp(12px, 2vw, 28px);
         }
 
         .mi-login-card-heading {
@@ -3781,15 +3911,116 @@ def aplicar_estilo():
             font-size: 13px;
         }
 
-        .st-key-mi-login-card [data-testid="stFormSubmitButton"] button {
+        .st-key-mi_login_submit [data-testid="stFormSubmitButton"] button {
+            position: relative;
+            overflow: hidden;
             width: 100%;
-            min-height: 46px;
-            margin-top: 7px;
+            min-height: 52px;
+            margin-top: 9px;
+            border: 1px solid rgba(132, 174, 225, .4);
+            border-radius: 12px;
+            background:
+                linear-gradient(112deg, #234F89 0%, #2D65A7 48%,
+                    #3B75B6 100%);
+            color: #FFFFFF;
+            font-size: 13px;
+            font-weight: 720;
+            letter-spacing: .025em;
+            box-shadow:
+                0 8px 20px rgba(24, 65, 115, .22),
+                inset 0 1px 0 rgba(255, 255, 255, .14);
+            transition:
+                transform 160ms ease,
+                border-color 160ms ease,
+                box-shadow 160ms ease,
+                filter 160ms ease;
+        }
+
+        .st-key-mi-login-card
+        .st-key-mi_login_submit
+        [data-testid="stFormSubmitButton"] button:not(:disabled):hover {
+            border-color: rgba(157, 193, 235, .62);
+            box-shadow:
+                0 10px 24px rgba(24, 65, 115, .3),
+                0 0 16px rgba(66, 119, 180, .18),
+                inset 0 1px 0 rgba(255, 255, 255, .16);
+            filter: brightness(1.035);
+            transform: translateY(-1px);
+        }
+
+        .st-key-mi-login-card
+        .st-key-mi_login_submit
+        [data-testid="stFormSubmitButton"] button:not(:disabled):active {
+            transform: translateY(0);
+            filter: brightness(.98);
+        }
+
+        .st-key-mi_login_submit
+        [data-testid="stFormSubmitButton"] button::before {
+            position: absolute;
+            top: -80%;
+            left: -35%;
+            width: 28%;
+            height: 260%;
+            background: linear-gradient(
+                90deg,
+                transparent,
+                rgba(255, 255, 255, .24),
+                transparent
+            );
+            content: "";
+            transform: rotate(22deg);
+            transition: left 520ms ease;
+            pointer-events: none;
+        }
+
+        .st-key-mi_login_submit
+        [data-testid="stFormSubmitButton"] button:not(:disabled):hover::before {
+            left: 110%;
+        }
+
+        .st-key-mi_password_recovery_submit
+        [data-testid="stFormSubmitButton"] button {
+            min-height: 42px;
+            margin-top: 3px;
+            padding: 0 14px;
+            border: 1px solid rgba(115, 169, 255, .22);
             border-radius: 9px;
+            background: rgba(23, 38, 59, .48);
+            color: #AFC2DA;
+            font-size: 11px;
+            font-weight: 600;
+            transition:
+                background-color 160ms ease,
+                border-color 160ms ease,
+                color 160ms ease;
+        }
+
+        .st-key-mi_password_recovery_submit
+        [data-testid="stFormSubmitButton"] button:not(:disabled):hover {
+            border-color: rgba(115, 156, 204, .4);
+            background: rgba(32, 55, 83, .62);
+            color: #D7E2F0;
+        }
+
+        .mi-login-notice {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 4px 8px;
+            margin: 0 0 22px;
+            padding: 10px 13px;
+            border: 1px solid rgba(115, 169, 255, .15);
+            border-radius: 10px;
+            background: rgba(23, 38, 59, .62);
+            color: #A9B9CE;
             font-size: 12px;
-            font-weight: 700;
-            letter-spacing: .01em;
-            box-shadow: 0 8px 22px rgba(79, 145, 245, .18);
+            line-height: 1.5;
+        }
+
+        .mi-login-notice-title {
+            color: #D7E4F5;
+            font-weight: 650;
         }
 
         .st-key-mi-login-card [data-testid="stAlert"] {
@@ -3809,6 +4040,7 @@ def aplicar_estilo():
 
             .mi-login-story {
                 min-height: 215px;
+                gap: 20px;
                 padding: 22px;
                 border-radius: 18px;
             }
@@ -3895,28 +4127,41 @@ def aplicar_estilo():
             color: var(--mi-color-text-muted);
         }
 
+        .st-key-mi-page-content [data-testid="stSpinner"] {
+            width: fit-content;
+            max-width: min(360px, 100%);
+            gap: 10px;
+            padding: 11px 15px;
+            border: 1px solid rgba(115, 169, 255, .14);
+            border-radius: 12px;
+            background:
+                linear-gradient(
+                    115deg,
+                    rgba(22, 35, 53, .96),
+                    rgba(17, 27, 42, .9)
+                );
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .16);
+            color: var(--mi-color-text-muted);
+            font-size: 12px;
+        }
+
+        .st-key-mi-page-content [data-testid="stSpinner"] svg {
+            color: #73A9FF;
+        }
+
         .st-key-mi-sidebar-connection-status {
             display: flex;
             flex-direction: column;
             gap: 3px;
             padding: 8px 2px 7px;
-            border-top: 1px solid var(--mi-color-border);
         }
 
         .st-key-mi-sidebar-footer {
-            position: sticky;
-            z-index: 20;
-            bottom: 0;
             flex: 0 0 auto;
             margin-top: auto;
             padding: 7px 0 4px;
-            border-top: 1px solid rgba(143, 161, 184, .12);
-            background: linear-gradient(
-                180deg,
-                rgba(15, 23, 42, .96),
-                #0F172A 20%
-            );
-            box-shadow: 0 -8px 16px rgba(8, 14, 25, .18);
+            background: transparent;
+            box-shadow: none;
         }
 
         [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
@@ -4197,42 +4442,24 @@ def aplicar_estilo():
             box-shadow: 0 0 7px rgba(74, 222, 128, .35);
         }
 
-        .st-key-mi-account-menu [data-testid="stPopover"] > button {
-            width: 30px;
+        .st-key-mi_logout_sidebar [data-testid="stBaseButton-tertiary"] {
+            width: auto;
+            min-width: 56px;
             min-height: 30px;
-            padding: 0;
-            border: 0;
-            border-radius: 50%;
-            background: transparent;
-            color: var(--mi-color-text-muted);
-            box-shadow: none;
-        }
-
-        .st-key-mi-account-menu [data-testid="stPopover"] > button
-        [data-testid="stIconMaterial"] {
-            display: none;
-        }
-
-        .st-key-mi-account-menu [data-testid="stPopover"] > button:hover {
-            border: 0;
-            background: rgba(143, 161, 184, .1);
-            color: var(--mi-color-text);
-            box-shadow: none;
-            transform: none;
-        }
-
-        [data-testid="stSidebar"] .st-key-mi_logout_menu > button {
-            min-height: 32px;
-            justify-content: flex-start;
-            padding: 5px 8px;
+            padding: 0 7px;
             border: 1px solid transparent;
+            border-radius: 8px;
             background: transparent;
             color: var(--mi-color-text-muted);
-            font-size: 11px;
             box-shadow: none;
         }
 
-        [data-testid="stSidebar"] .st-key-mi_logout_menu > button:hover {
+        .st-key-mi_logout_sidebar {
+            margin-top: 5px;
+        }
+
+        .st-key-mi_logout_sidebar
+        [data-testid="stBaseButton-tertiary"]:hover {
             border-color: rgba(255, 128, 109, .18);
             background: rgba(255, 128, 109, .06);
             color: var(--mi-color-danger);
@@ -5730,6 +5957,7 @@ def aplicar_estilo():
         section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
             display: flex;
             flex-direction: column;
+            overflow-x: hidden;
         }
 
         section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
@@ -5774,8 +6002,10 @@ def aplicar_estilo():
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
             order: 1;
             min-height: 0;
+            min-width: 0;
             flex: 0 1 auto;
             overflow-y: auto;
+            overflow-x: hidden;
         }
 
         section[data-testid="stSidebar"] .st-key-mi-sidebar-footer {
@@ -5841,6 +6071,8 @@ def aplicar_estilo():
         }
 
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul {
+            width: 100%;
+            min-width: 0;
             gap: 2px;
         }
 
@@ -5863,13 +6095,15 @@ def aplicar_estilo():
         a[data-testid="stSidebarNavLink"] {
 
             min-height: 36px;
+            min-width: 0;
+            box-sizing: border-box;
 
             border-radius: 8px;
 
             transition:
-                background-color 140ms ease,
-                transform 140ms ease,
-                border-color 140ms ease;
+                background-color 180ms ease,
+                border-color 180ms ease,
+                color 180ms ease;
 
             border-left:
                 3px solid transparent;
@@ -5900,21 +6134,64 @@ def aplicar_estilo():
             font-size: 12px !important;
             font-weight: inherit !important;
             line-height: 1.25 !important;
+            transition:
+                color 180ms ease,
+                transform 180ms ease;
         }
 
+        section[data-testid="stSidebar"]
+        a[data-testid="stSidebarNavLink"] [data-testid="stIconMaterial"] {
+            color: #91A7C2;
+            transition:
+                color 180ms ease,
+                transform 180ms cubic-bezier(.2, .7, .2, 1);
+        }
 
         section[data-testid="stSidebar"]
-        a[data-testid="stSidebarNavLink"]:hover {
+        a[data-testid="stSidebarNavLink"]:not([aria-current="page"]):hover,
+        section[data-testid="stSidebar"]
+        a[data-testid="stSidebarNavLink"]:not([aria-current="page"]):focus-visible {
 
-            background-color:
-                rgba(96,165,250,0.08);
-
-            transform:
-                translateX(1px);
+            background:
+                linear-gradient(
+                    100deg,
+                    rgba(68, 112, 171, .16),
+                    rgba(42, 72, 111, .07)
+                );
 
             border-left:
-                3px solid rgba(96,165,250,0.45);
+                3px solid rgba(115, 169, 255, .62);
 
+            color: #D7E5F7;
+        }
+
+        section[data-testid="stSidebar"]
+        a[data-testid="stSidebarNavLink"]:not([aria-current="page"]):hover p,
+        section[data-testid="stSidebar"]
+        a[data-testid="stSidebarNavLink"]:not([aria-current="page"]):focus-visible p {
+            color: #E6F0FF;
+            transform: translateX(2px);
+        }
+
+        section[data-testid="stSidebar"]
+        a[data-testid="stSidebarNavLink"]:not([aria-current="page"]):hover
+        [data-testid="stIconMaterial"],
+        section[data-testid="stSidebar"]
+        a[data-testid="stSidebarNavLink"]:not([aria-current="page"]):focus-visible
+        [data-testid="stIconMaterial"] {
+            color: #9FC5FF;
+            transform: translateX(2px);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            section[data-testid="stSidebar"]
+            a[data-testid="stSidebarNavLink"],
+            section[data-testid="stSidebar"]
+            a[data-testid="stSidebarNavLink"] p,
+            section[data-testid="stSidebar"]
+            a[data-testid="stSidebarNavLink"] [data-testid="stIconMaterial"] {
+                transition: none;
+            }
         }
 
 

@@ -16,6 +16,7 @@ from secoes.produtos import mostrar_portfolio, mostrar_produtos
 
 
 animar_pagina("produtos_estoque")
+renderizar_animacoes_entrada_pagina()
 cabecalho_pagina(
     "Produtos & Estoque",
     "Desempenho dos produtos e disponibilidade de estoque.",
@@ -92,5 +93,4 @@ with abas[2]:
     if aba_ativa == "Portfólio":
         mostrar_portfolio(produtos, estoque)
 
-renderizar_animacoes_entrada_pagina()
 st.session_state["_mi_page_entering"] = False

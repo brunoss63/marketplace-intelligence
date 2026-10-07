@@ -499,6 +499,7 @@ def _mostrar_detalhe_pedido(tabela: pd.DataFrame) -> None:
 
 
 animar_pagina("vendas_pedidos")
+renderizar_animacoes_entrada_pagina()
 cabecalho_pagina(
     "Vendas & Pedidos",
     "Consulte pedidos individuais e acompanhe os detalhes das vendas.",
@@ -978,5 +979,3 @@ else:
 
     if st.session_state.get("_vendas_pedidos_detalhe_aberto", False):
         _mostrar_detalhe_pedido(ordenada)
-
-renderizar_animacoes_entrada_pagina()

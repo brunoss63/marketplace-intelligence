@@ -81,7 +81,7 @@ def renderizar_filtros_globais() -> None:
     if st.session_state.get("marketplace_global") not in opcoes_marketplaces:
         st.session_state["marketplace_global"] = opcao_todos_marketplaces
 
-    with st.container():
+    with st.container(key="mi-global-filters"):
         if datas_validas.empty:
             st.info(
                 "Ainda não há pedidos concluídos. Importe seus arquivos "

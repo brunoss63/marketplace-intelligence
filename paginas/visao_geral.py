@@ -42,6 +42,7 @@ def _moeda_br(valor: float) -> str:
 # ============================================================
 
 animar_pagina("visao_geral")
+renderizar_animacoes_entrada_pagina()
 
 cabecalho_pagina(
     "Visão Geral",
@@ -1081,5 +1082,3 @@ with st.container(
         icon=":material/arrow_forward:",
         width="content",
     )
-
-renderizar_animacoes_entrada_pagina()

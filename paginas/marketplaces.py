@@ -17,6 +17,7 @@ from status_conexoes import obter_status_conexoes
 # =========================================================
 
 animar_pagina("marketplaces")
+renderizar_animacoes_entrada_pagina()
 
 
 # =========================================================
@@ -54,4 +55,3 @@ skeleton_slot = st.empty()
 with skeleton_slot.container():
     renderizar_skeleton_marketplaces()
 mostrar_marketplace(skeleton_slot=skeleton_slot)
-renderizar_animacoes_entrada_pagina()
