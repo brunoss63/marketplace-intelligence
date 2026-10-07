@@ -22,11 +22,12 @@
 - OAuth Mercado Livre PROD conectado inicialmente pelo owner; teste de
   sincronização e acesso persistente ainda pendentes
 - Fluxo próprio de convite/definição e recuperação de senha implementado, mas
-  ainda pendente de teste real: o código foi publicado e o callback estático foi
-  allowlisted no Supabase Auth PROD. O Site URL agora aponta para a página de
-  callback e o domínio raiz do app continua permitido. O smoke test com dados
-  fictícios passou; validar um link real de convite e um de recuperação antes
-  de convidar o cliente.
+  parcialmente validado: o callback estático foi publicado e allowlisted no
+  Supabase Auth PROD; o owner confirmou que um link real de recuperação abriu o
+  formulário. O Site URL aponta para a página de callback e o domínio raiz do
+  app continua permitido. Os smoke tests sintéticos de link válido/expirado e
+  a verificação visual do tema passaram. Ainda falta testar o link real de
+  convite antes de convidar o cliente.
 - Shopee automatizada em PROD; enquanto o OAuth não for aprovado, avaliar a
   importação manual de arquivos Shopee como contingência
 - Persistência de login após F5/reconexão confirmada visualmente pelo owner;
@@ -308,18 +309,19 @@ OAuth ficam pendentes até a implementação e aprovação das integrações PRO
 #### ⏸️ Tarefa 4.2: Criar conta e tenant do cliente
 Não envie convite ainda. O cliente precisa conseguir aceitar o convite e definir
 a senha inicial sem depender de um script executado localmente pelo owner. O
-fluxo foi publicado em `4d67b8e`. No Supabase Auth PROD, o Site URL aponta para
+fluxo está publicado em `ecd47c7`. No Supabase Auth PROD, o Site URL aponta para
 o documento estático `~/+/app/static/auth_password_flow.html`, com os
 parâmetros públicos necessários; a raiz do app e esse callback estão na lista
-Redirect URLs. O smoke test no browser com fragmentos fictícios confirmou que
-o formulário de senha abre, o fragmento é removido e links expirados mostram
-erro sem submeter senha. Nenhum e-mail foi enviado nem senha alterada.
+Redirect URLs. O owner confirmou que o link real de recuperação chegou ao
+formulário. Os smoke tests no browser com fragmentos fictícios também
+confirmaram que o formulário abre, o fragmento é removido e links expirados
+mostram erro sem submeter senha. O tema foi conferido em desktop e viewport
+móvel. Nenhuma senha foi alterada.
 
-Antes do convite do cliente, mediante autorização do owner, solicitar um link
-real de recuperação para a conta owner e validar o percurso até o formulário;
-depois validar um link real de convite. Não convide o cliente até confirmar
-ambos e verificar os templates Auth. Também é necessário obter autorização e o
-e-mail individual do cliente.
+Antes do convite do cliente, mediante autorização do owner, validar um link real
+de convite e conferir o template Auth. Não convide o cliente até concluir essa
+validação. Também é necessário obter autorização e o e-mail individual do
+cliente.
 
 Depois de liberada a produção:
 1. Convide a conta individual em Supabase PROD → Auth → Users.
@@ -509,12 +511,13 @@ distintas; essa conta ainda não foi criada.
 - `AUTH_SESSION_ENCRYPTION_KEY` foi configurada pelo owner somente nos Secrets
   do Streamlit PROD; mantê-la estável e independente das chaves dos
   marketplaces, sem gravá-la em arquivos versionados ou no chat.
-- O callback publicado em `4d67b8e` usa o documento estático
+- O callback publicado em `ecd47c7` usa o documento estático
   `static/auth_password_flow.html` como destino direto de convite e recuperação,
   fora da inicialização do Streamlit. O Supabase Auth PROD já permite esse
   destino e agora o usa como Site URL padrão; o domínio raiz continua permitido.
-  O smoke test sintético passou, mas ainda falta validar links reais de convite
-  e recuperação antes de convidar o cliente.
+  O owner confirmou o link real de recuperação; o smoke test sintético cobriu
+  expirado, execução do formulário e estilo desktop/móvel. Falta validar um link
+  real de convite antes de convidar o cliente.
 - O identificador de sessão fica em cookie gerenciado pelo componente
   Streamlit; tokens Supabase são cifrados no Supabase. O cookie não é
   HttpOnly, uma limitação do componente, mas não conterá credenciais Supabase.
