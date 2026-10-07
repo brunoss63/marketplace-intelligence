@@ -572,16 +572,6 @@ def _renderizar_login(
     cookie_manager: stx.CookieManager,
     ambiente: str,
 ) -> None:
-    url_supabase, chave_publica = _credenciais_supabase(ambiente)
-    if url_supabase is None or chave_publica is None:
-        raise RuntimeError(
-            "As credenciais públicas do Supabase são necessárias para "
-            "definir a senha."
-        )
-    st.iframe(
-        _url_fluxo_definicao_senha(ambiente, url_supabase, chave_publica),
-        height=440,
-    )
     st.markdown('<div class="mi-login-layout"></div>', unsafe_allow_html=True)
     painel, formulario = st.columns([1.05, .95], gap="large")
 
