@@ -27,17 +27,24 @@ _URL_AUTORIZACAO = "https://partner.shopeemobile.com/api/v2/shop/auth_partner"
 _URL_TOKEN = "https://partner.shopeemobile.com/api/v2/auth/token/get"
 _TIMEOUT_REQUISICAO = (5, 15)
 _ANTECEDENCIA_REFRESH = timedelta(minutes=2)
-_MENSAGEM_DEZAVIO = (
-    "A integração da Shopee ainda está em desenvolvimento e ficará "
-    "habilitada apenas após a migração, os secrets e a configuração "
-    "OAuth do marketplace."
+_MENSAGEM_CREDENCIAIS_PENDENTES = (
+    "A Shopee precisa de credenciais válidas do Open Platform, callback "
+    "registrado e chave de criptografia para este ambiente."
 )
-_CONFIGURACAO_NECESSARIA = {
-    "app_id": "SHOPEE_APP_ID",
-    "app_secret": "SHOPEE_APP_SECRET",
-    "redirect_uri": "SHOPEE_REDIRECT_URI",
-    "token_encryption_key": "SHOPEE_TOKEN_ENCRYPTION_KEY",
+_SUFIXOS_CONFIGURACAO = {
+    "app_id": "APP_ID",
+    "app_secret": "APP_SECRET",
+    "redirect_uri": "REDIRECT_URI",
+    "token_encryption_key": "TOKEN_ENCRYPTION_KEY",
 }
+
+
+def _nomes_configuracao_shopee(ambiente: str) -> dict[str, str]:
+    prefixo = "SHOPEE_DEV" if ambiente == "development" else "SHOPEE_PROD"
+    return {
+        chave: f"{prefixo}_{sufixo}"
+        for chave, sufixo in _SUFIXOS_CONFIGURACAO.items()
+    }
 
 
 def _obter_usuario_id() -> str:
@@ -59,17 +66,29 @@ def _formatar_data_hora(valor: datetime) -> str:
 
 
 def _fernet() -> Fernet:
-    chave = obter_configuracao("SHOPEE_TOKEN_ENCRYPTION_KEY", preferir_secrets=True)
+    ambiente = obter_configuracao("MI_ENV")
+    if ambiente not in {"development", "production"}:
+        raise RuntimeError(
+            "A criptografia dos tokens Shopee exige MI_ENV como "
+            "'development' ou 'production'."
+        )
+    nome_chave = _nomes_configuracao_shopee(ambiente)["token_encryption_key"]
+    chave = obter_configuracao(nome_chave, preferir_secrets=True)
+    if not chave and ambiente == "development":
+        chave = obter_configuracao(
+            "SHOPEE_TOKEN_ENCRYPTION_KEY",
+            preferir_secrets=True,
+        )
     if not chave or not str(chave).strip():
         raise RuntimeError(
-            "Configure SHOPEE_TOKEN_ENCRYPTION_KEY para persistir tokens da "
-            "Shopee de forma criptografada no tenant."
+            f"Configure {nome_chave} para persistir tokens da Shopee "
+            "criptografados."
         )
     try:
         return Fernet(chave.encode("ascii"))
     except (UnicodeEncodeError, ValueError) as erro:
         raise RuntimeError(
-            "SHOPEE_TOKEN_ENCRYPTION_KEY não é uma chave Fernet válida."
+            f"{nome_chave} não é uma chave Fernet válida."
         ) from erro
 
 
@@ -115,26 +134,42 @@ def _url_de_autorizacao(
 def _obter_configuracao_shopee() -> dict[str, str]:
     """Lê e valida as configurações necessárias do app Shopee."""
     ambiente = obter_configuracao("MI_ENV")
-    if ambiente != "development":
+    if ambiente not in {"development", "production"}:
         raise RuntimeError(
-            "A integração Shopee está disponível somente no ambiente "
-            "development até que o app do Open Platform seja configurado."
+            "A integração Shopee exige MI_ENV='development' ou "
+            "MI_ENV='production'."
         )
 
+    nomes_configuracao = _nomes_configuracao_shopee(ambiente)
     configuracao = {
-        nome_chave: obter_configuracao(chave, preferir_secrets=True)
-        for nome_chave, chave in _CONFIGURACAO_NECESSARIA.items()
+        chave: obter_configuracao(nome, preferir_secrets=True)
+        for chave, nome in nomes_configuracao.items()
     }
+    if ambiente == "development":
+        for campo, nome_legado in {
+            "app_id": "SHOPEE_APP_ID",
+            "app_secret": "SHOPEE_APP_SECRET",
+            "redirect_uri": "SHOPEE_REDIRECT_URI",
+            "token_encryption_key": "SHOPEE_TOKEN_ENCRYPTION_KEY",
+        }.items():
+            if not configuracao.get(campo):
+                configuracao[campo] = obter_configuracao(
+                    nome_legado,
+                    preferir_secrets=True,
+                )
+
     faltantes = [
-        nome_seguro
-        for nome_chave, nome_seguro in _CONFIGURACAO_NECESSARIA.items()
-        if not configuracao.get(nome_chave)
-        or not str(configuracao.get(nome_chave, "")).strip()
+        nomes_configuracao[campo]
+        for campo in _SUFIXOS_CONFIGURACAO
+        if not configuracao.get(campo)
+        or not str(configuracao.get(campo, "")).strip()
     ]
     if faltantes:
         raise RuntimeError(
-            "Configure estes secrets de desenvolvimento antes da autenticação "
-            "Shopee: " + ", ".join(sorted(set(faltantes))) + "."
+            f"Configure os secrets do ambiente {ambiente} antes da "
+            "autenticação Shopee: "
+            + ", ".join(sorted(set(faltantes)))
+            + "."
         )
 
     valores = {chave: str(valor) for chave, valor in configuracao.items()}
@@ -148,10 +183,12 @@ def _obter_configuracao_shopee() -> dict[str, str]:
         or redirect.password
         or redirect.query
         or redirect.fragment
+        or (ambiente == "production" and redirect.scheme != "https")
     ):
         raise RuntimeError(
-            "SHOPEE_REDIRECT_URI precisa ser uma URL fixa, sem credenciais, "
-            "query string ou fragmento, e compatível com o callback do app."
+            f"{nomes_configuracao['redirect_uri']} precisa ser uma URL fixa, "
+            "sem credenciais, query string ou fragmento e compatível com o "
+            "callback do app. Em production, use HTTPS."
         )
     return valores
 
@@ -424,7 +461,7 @@ def _renovar_tokens_shopee(
 def obter_access_token_shopee() -> str:
     if not is_database_mode():
         raise RuntimeError(
-            "A API da Shopee exige uma conexão no ambiente Supabase DEV."
+            "A API da Shopee exige uma conexão em um ambiente Supabase."
         )
 
     tenant_id = obter_tenant_id()
@@ -492,11 +529,24 @@ def _remover_conexao_shopee() -> None:
 
 def _diagnostico_configuracao_shopee() -> str:
     """Resumo seguro da origem dos secrets sem expor valores sensíveis."""
+    ambiente = obter_configuracao("MI_ENV")
+    nomes_configuracao = _nomes_configuracao_shopee(ambiente)
     origens = {
-        chave: obter_origem_configuracao(nome, preferir_secrets=True)
-        for nome_chave, nome in _CONFIGURACAO_NECESSARIA.items()
-        for chave in [nome_chave]
+        campo: obter_origem_configuracao(nome, preferir_secrets=True)
+        for campo, nome in nomes_configuracao.items()
     }
+    if ambiente == "development":
+        for campo, nome_legado in {
+            "app_id": "SHOPEE_APP_ID",
+            "app_secret": "SHOPEE_APP_SECRET",
+            "redirect_uri": "SHOPEE_REDIRECT_URI",
+            "token_encryption_key": "SHOPEE_TOKEN_ENCRYPTION_KEY",
+        }.items():
+            if origens[campo] == "ausente":
+                origens[campo] = obter_origem_configuracao(
+                    nome_legado,
+                    preferir_secrets=True,
+                )
     return (
         "Diagnóstico seguro: "
         + ", ".join(
@@ -531,7 +581,7 @@ def iniciar_conexao_shopee() -> str:
     """Gera a URL de autorização OAuth do Open Platform Shopee."""
     if not is_database_mode():
         raise RuntimeError(
-            "A conexão com marketplaces exige o ambiente Supabase DEV."
+            "A conexão com marketplaces exige um ambiente Supabase."
         )
 
     configuracao = _obter_configuracao_shopee()
@@ -661,7 +711,7 @@ def processar_callback_shopee() -> None:
 def status_integracao_shopee() -> str:
     """Retorna um resumo legível do estado atual da integração."""
     if not is_database_mode():
-        return "Disponível somente em ambiente Supabase DEV."
+        return "Disponível somente em ambiente Supabase (DEV ou PROD)."
 
     try:
         _obter_configuracao_shopee()
@@ -669,8 +719,8 @@ def status_integracao_shopee() -> str:
         mensagem = str(erro)
         return (
             "Configuração pendente: " + mensagem
-            if "Configure estes secrets" in mensagem
-            else "Em desenvolvimento: " + mensagem
+            if "Configure os secrets do ambiente" in mensagem
+            else "Configuração inválida: " + mensagem
         )
 
     try:
@@ -714,8 +764,8 @@ def mostrar_conexao_shopee() -> None:
     status = status_integracao_shopee()
     if not is_database_mode():
         st.info(
-            "A integração da Shopee precisa do ambiente Supabase DEV para "
-            "ser validada."
+            "A integração da Shopee exige um ambiente Supabase para ser "
+            "validada."
         )
         st.caption(status)
         return
@@ -723,11 +773,11 @@ def mostrar_conexao_shopee() -> None:
     try:
         _obter_configuracao_shopee()
     except RuntimeError:
-        st.warning(_MENSAGEM_DEZAVIO)
+        st.warning(_MENSAGEM_CREDENCIAIS_PENDENTES)
         st.caption(status)
         st.info(
-            "Plano atual: completar a migração de credenciais e permissões, "
-            "depois implementar OAuth, pedidos e sincronização de estoque."
+            "Configure as credenciais do Open Platform e o callback aprovado "
+            "para este ambiente."
         )
         return
 
@@ -738,7 +788,8 @@ def mostrar_conexao_shopee() -> None:
 
     if conexao is None:
         st.info(
-            "Configuração do app Shopee detectada. A base OAuth e o callback "
+            "Configuração do app Shopee detectada para este ambiente. "
+            "A base OAuth e o callback "
             "estão preparados e a sincronização de pedidos/estoque foi "
             "implementada em uma camada dedicada para a API da Shopee."
         )
@@ -759,7 +810,8 @@ def mostrar_conexao_shopee() -> None:
         return
 
     st.info(
-        "Configuração do app Shopee detectada. A base OAuth e o callback "
+        "Configuração do app Shopee detectada para este ambiente. "
+        "A base OAuth e o callback "
         "estão preparados e a sincronização de pedidos/estoque foi "
         "implementada em uma camada dedicada para a API da Shopee."
     )
@@ -791,7 +843,7 @@ def exigir_integracao_shopee() -> None:
     """Valida que o tenant e os secrets da Shopee estejam prontos."""
     if not is_database_mode():
         raise RuntimeError(
-            "A integração da Shopee exige o ambiente Supabase DEV para "
+            "A integração da Shopee exige um ambiente Supabase para "
             "validar a conexão e a sincronização."
         )
     _obter_configuracao_shopee()

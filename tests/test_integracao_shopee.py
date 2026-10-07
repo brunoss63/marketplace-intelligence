@@ -4,13 +4,15 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import Mock, patch
 from uuid import UUID
 
+from cryptography.fernet import Fernet
+
 import integracao_shopee
 
 
 class TestIntegracaoShopee(unittest.TestCase):
     def test_status_indica_ambiente_dev_necessario(self) -> None:
         with patch("integracao_shopee.is_database_mode", return_value=False):
-            self.assertIn("DEV", integracao_shopee.status_integracao_shopee())
+            self.assertIn("Supabase", integracao_shopee.status_integracao_shopee())
 
     def test_status_indica_configuracao_pendente_quando_faltam_secrets(self) -> None:
         with patch("integracao_shopee.is_database_mode", return_value=True):
@@ -37,6 +39,152 @@ class TestIntegracaoShopee(unittest.TestCase):
 
                     status = integracao_shopee.status_integracao_shopee()
                     self.assertIn("Pronta para OAuth", status)
+
+    def test_configuracao_prod_usa_secrets_exclusivos_de_prod(self) -> None:
+        chave = "-T5J_7xQvR-9J7aM0DNy4_dVvS2AP-wNjX1Yw1gCejaA="
+        valores = {
+            "MI_ENV": "production",
+            "SHOPEE_PROD_APP_ID": "prod-app-id",
+            "SHOPEE_PROD_APP_SECRET": "prod-app-secret",
+            "SHOPEE_PROD_REDIRECT_URI": (
+                "https://marketplace-intelligence-live.streamlit.app/"
+            ),
+            "SHOPEE_PROD_TOKEN_ENCRYPTION_KEY": chave,
+            "SHOPEE_DEV_APP_ID": "dev-app-id",
+            "SHOPEE_DEV_APP_SECRET": "dev-app-secret",
+            "SHOPEE_DEV_REDIRECT_URI": (
+                "https://marketplace-intelligence-dev.streamlit.app/"
+            ),
+            "SHOPEE_DEV_TOKEN_ENCRYPTION_KEY": "dev-key",
+            "SHOPEE_APP_ID": "legacy-app-id",
+            "SHOPEE_APP_SECRET": "legacy-app-secret",
+            "SHOPEE_REDIRECT_URI": "https://legacy.example.com/",
+            "SHOPEE_TOKEN_ENCRYPTION_KEY": "legacy-key",
+        }
+
+        with patch(
+            "integracao_shopee.obter_configuracao",
+            side_effect=lambda nome, preferir_secrets=False: valores.get(nome),
+        ) as configuracao_mock:
+            configuracao = integracao_shopee._obter_configuracao_shopee()
+
+        self.assertEqual(configuracao["app_id"], "prod-app-id")
+        self.assertEqual(configuracao["app_secret"], "prod-app-secret")
+        self.assertEqual(
+            configuracao["redirect_uri"],
+            "https://marketplace-intelligence-live.streamlit.app/",
+        )
+        self.assertEqual(configuracao["token_encryption_key"], chave)
+        self.assertNotIn(
+            "SHOPEE_DEV_APP_ID",
+            [call.args[0] for call in configuracao_mock.call_args_list],
+        )
+        self.assertNotIn(
+            "SHOPEE_APP_ID",
+            [call.args[0] for call in configuracao_mock.call_args_list],
+        )
+
+    def test_configuracao_prod_nao_usa_credenciais_dev_ou_legadas(self) -> None:
+        valores = {
+            "MI_ENV": "production",
+            "SHOPEE_DEV_APP_ID": "dev-app-id",
+            "SHOPEE_APP_ID": "legacy-app-id",
+        }
+        with patch(
+            "integracao_shopee.obter_configuracao",
+            side_effect=lambda nome, preferir_secrets=False: valores.get(nome),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "SHOPEE_PROD_APP_ID",
+            ):
+                integracao_shopee._obter_configuracao_shopee()
+
+    def test_configuracao_prod_exige_callback_https(self) -> None:
+        valores = {
+            "MI_ENV": "production",
+            "SHOPEE_PROD_APP_ID": "prod-app-id",
+            "SHOPEE_PROD_APP_SECRET": "prod-app-secret",
+            "SHOPEE_PROD_REDIRECT_URI": (
+                "http://marketplace-intelligence-live.streamlit.app/"
+            ),
+            "SHOPEE_PROD_TOKEN_ENCRYPTION_KEY": (
+                "-T5J_7xQvR-9J7aM0DNy4_dVvS2AP-wNjX1Yw1gCejaA="
+            ),
+        }
+        with patch(
+            "integracao_shopee.obter_configuracao",
+            side_effect=lambda nome, preferir_secrets=False: valores.get(nome),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Em production, use HTTPS",
+            ):
+                integracao_shopee._obter_configuracao_shopee()
+
+    def test_configuracao_dev_prefere_secrets_com_prefixo_de_ambiente(self) -> None:
+        valores = {
+            "MI_ENV": "development",
+            "SHOPEE_DEV_APP_ID": "dev-app-id",
+            "SHOPEE_DEV_APP_SECRET": "dev-app-secret",
+            "SHOPEE_DEV_REDIRECT_URI": (
+                "https://marketplace-intelligence-dev.streamlit.app/"
+            ),
+            "SHOPEE_DEV_TOKEN_ENCRYPTION_KEY": (
+                "-T5J_7xQvR-9J7aM0DNy4_dVvS2AP-wNjX1Yw1gCejaA="
+            ),
+            "SHOPEE_APP_ID": "legacy-app-id",
+            "SHOPEE_APP_SECRET": "legacy-app-secret",
+            "SHOPEE_REDIRECT_URI": "https://legacy.example.com/",
+            "SHOPEE_TOKEN_ENCRYPTION_KEY": "legacy-key",
+        }
+        with patch(
+            "integracao_shopee.obter_configuracao",
+            side_effect=lambda nome, preferir_secrets=False: valores.get(nome),
+        ):
+            configuracao = integracao_shopee._obter_configuracao_shopee()
+
+        self.assertEqual(configuracao["app_id"], "dev-app-id")
+        self.assertEqual(
+            configuracao["redirect_uri"],
+            "https://marketplace-intelligence-dev.streamlit.app/",
+        )
+
+    def test_fernet_prod_usa_chave_propria_do_ambiente(self) -> None:
+        chave_prod = Fernet.generate_key().decode("ascii")
+        valores = {
+            "MI_ENV": "production",
+            "SHOPEE_PROD_TOKEN_ENCRYPTION_KEY": chave_prod,
+            "SHOPEE_TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii"),
+        }
+        with patch(
+            "integracao_shopee.obter_configuracao",
+            side_effect=lambda nome, preferir_secrets=False: valores.get(nome),
+        ) as configuracao_mock:
+            fernet = integracao_shopee._fernet()
+
+        valor = fernet.encrypt(b"token de teste")
+        self.assertEqual(fernet.decrypt(valor), b"token de teste")
+        self.assertNotIn(
+            "SHOPEE_TOKEN_ENCRYPTION_KEY",
+            [call.args[0] for call in configuracao_mock.call_args_list],
+        )
+
+    def test_fernet_prod_nao_faz_fallback_para_chave_legada(self) -> None:
+        chave_legada = Fernet.generate_key().decode("ascii")
+        valores = {
+            "MI_ENV": "production",
+            "SHOPEE_TOKEN_ENCRYPTION_KEY": chave_legada,
+        }
+        with patch(
+            "integracao_shopee.obter_configuracao",
+            side_effect=lambda nome, preferir_secrets=False: valores.get(nome),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "SHOPEE_PROD_TOKEN_ENCRYPTION_KEY",
+            ):
+                integracao_shopee._fernet()
 
     def test_mostrar_conexao_shopee_nao_quebra(self) -> None:
         with patch("integracao_shopee.is_database_mode", return_value=True):

@@ -192,10 +192,24 @@ notificações do Mercado Livre; até validar um evento autorizado, trate a
 atualização como manual.
 
 A Shopee ainda não tem aplicação registrada, credenciais elegíveis ou loja
-autorizada para testes live. O código atual prepara OAuth, persistência segura
-e sincronização, mas chamadas reais, sincronização pela interface e webhooks
-permanecem bloqueados até confirmar acesso e contratos oficiais da Open
-Platform. Não conectar a loja de terceiros antes de obter sua autorização.
+autorizada para testes live. O código já aceita configuração independente por
+ambiente, inclusive PROD, mas OAuth/sincronização real e webhooks continuam
+pendentes da aprovação da aplicação e de credenciais do app da própria loja.
+Configure no Streamlit Secrets do deploy correspondente:
+
+- DEV: `SHOPEE_DEV_APP_ID`, `SHOPEE_DEV_APP_SECRET`,
+  `SHOPEE_DEV_REDIRECT_URI` e `SHOPEE_DEV_TOKEN_ENCRYPTION_KEY`.
+- PROD: `SHOPEE_PROD_APP_ID`, `SHOPEE_PROD_APP_SECRET`,
+  `SHOPEE_PROD_REDIRECT_URI` e `SHOPEE_PROD_TOKEN_ENCRYPTION_KEY`.
+
+O redirect PROD deve ser HTTPS e corresponder exatamente ao callback
+registrado no Open Platform, usando o domínio live do Streamlit. Use uma chave
+Fernet própria para cada ambiente e o projeto Supabase correspondente; nunca
+reaproveite a chave de DEV em PROD. Os nomes legados `SHOPEE_APP_ID`,
+`SHOPEE_APP_SECRET`, `SHOPEE_REDIRECT_URI` e
+`SHOPEE_TOKEN_ENCRYPTION_KEY` continuam aceitos somente em development para
+compatibilidade e não habilitam PROD. Não cadastre credenciais até a aprovação
+e autorização do titular da loja; nunca as envie pelo chat ou repositório.
 
 ### Atualizações automáticas de pedidos no Mercado Livre
 

@@ -29,8 +29,9 @@
   continua permitido. Os smoke tests sintéticos de link expirado e a verificação
   visual do tema também passaram. O cadastro e o onboarding do cliente continuam
   pendentes de autorização e dados dele.
-- Shopee automatizada em PROD; enquanto o OAuth não for aprovado, avaliar a
-  importação manual de arquivos Shopee como contingência
+- Suporte do app a credenciais Shopee separadas DEV/PROD preparado; cadastro
+  da aplicação pelo titular da loja, credenciais PROD e validação OAuth/live
+  ainda pendentes. Importação manual é a contingência.
 - Persistência de login após F5/reconexão confirmada visualmente pelo owner;
   ainda faltam os testes de logout/revogação e expiração
 - Backup manual e restauração testados (o plano Free não inclui backup automático)
@@ -57,8 +58,9 @@
   fallback para `SUPABASE_URL` e `SUPABASE_ANON_KEY`.
 - A configuração local observada está em `development`. Isso não confirma
   quais Secrets estão atualmente definidos no Streamlit Community Cloud.
-- Mercado Livre e Shopee ainda bloqueiam OAuth fora de `development`; mudar
-  `MI_ENV` sozinho não libera essas integrações.
+- Mercado Livre seleciona OAuth por ambiente. Shopee agora também aceita
+  credenciais DEV/PROD independentes; mudar `MI_ENV` sozinho não habilita
+  OAuth sem os secrets específicos daquele ambiente.
 - Um teste isolado com configurações simuladas confirmou que `production`
   escolhe `SUPABASE_PROD_*` e `development` escolhe `SUPABASE_DEV_*`. Não
   executei o app nem conectei aos projetos Supabase.
@@ -67,7 +69,9 @@
   ser confirmado pela configuração local.
 
 #### ✅ Tarefa 1.2: Preparar secrets PROD separados
-- [x] Gerar chaves de criptografia PROD independentes para Mercado Livre e Shopee
+- [x] Gerar chave de criptografia PROD independente para Mercado Livre.
+- [ ] Gerar a chave Fernet Shopee PROD independente no momento de configurar
+  a aplicação aprovada do cliente; não reaproveitar a chave DEV.
 - [x] Criar e confirmar o projeto Supabase PROD e cadastrar seu URL local como `SUPABASE_PROD_URL`
 - [x] Obter a chave anon/publicável do projeto PROD e cadastrá-la como `SUPABASE_PROD_ANON_KEY` sem compartilhá-la no chat ou repositório
 - [x] Confirmar que o `secrets.toml` local não contém `service_role`; essa chave nunca deve ser adicionada aos Secrets do app
