@@ -403,12 +403,17 @@ def mostrar_marketplace(*, skeleton_slot=None):
                 linha["Shopee"] = "—"
 
     tabela_comparativa_df = pd.DataFrame(tabela_comparativa)
-    titulo_secao(
-        "Comparativo de indicadores",
-        "Valores dos marketplaces no período selecionado.",
+    coluna_comparativo, coluna_participacao = st.columns(
+        [1.25, 1],
+        gap="medium",
+        vertical_alignment="top",
     )
-    classe_entrada, atraso_entrada = proxima_animacao_entrada_pagina()
-    with st.container(border=True):
+    with coluna_comparativo:
+        titulo_secao(
+            "Comparativo de indicadores",
+            "Valores dos marketplaces no período selecionado.",
+        )
+        classe_entrada, atraso_entrada = proxima_animacao_entrada_pagina()
         if classe_entrada:
             st.markdown(
                 '<span class="mi-marketplace-table-entering" '
@@ -440,9 +445,10 @@ def mostrar_marketplace(*, skeleton_slot=None):
                 "Pedidos": "Operacional",
             },
             pontos_cabecalho=("Mercado Livre",),
-            largura_maxima_px=820,
-            largura_minima_px=560,
+            largura_maxima_px=760,
+            largura_minima_px=480,
             borda_externa=False,
+            compacta=True,
         )
         if not tem_comparacao_canais:
             marketplace_ausente = (
@@ -456,66 +462,62 @@ def mostrar_marketplace(*, skeleton_slot=None):
                 unsafe_allow_html=True,
             )
 
-    titulo_secao(
-        "Participação por canal",
-        "Distribuição de faturamento, pedidos e unidades no período selecionado.",
-    )
-    metricas_participacao = (
-        ("Faturamento", "faturamento", "currency"),
-        ("Pedidos", "pedidos", "integer"),
-        ("Unidades", "unidades", "integer"),
-    )
-    colunas_participacao = st.columns(3, gap="small")
-    for coluna_card, (titulo, chave_metrica, formato) in zip(
-        colunas_participacao,
-        metricas_participacao,
-    ):
-        valores_canais = [
-            (
-                marketplace,
-                float(comparativo.loc[marketplace, chave_metrica]),
-            )
-            for marketplace in canais_com_vendas
-        ]
-        valores_canais.sort(key=lambda item: item[1], reverse=True)
-        total_metrica = sum(valor for _, valor in valores_canais)
-        linhas_participacao = []
-        for indice, (marketplace, valor) in enumerate(valores_canais):
-            if formato == "currency":
-                valor_formatado = formatar_moeda_br(valor)
-            else:
-                valor_formatado = f"{valor:,.0f}".replace(",", ".")
-            participacao = (
-                valor / total_metrica * 100
-                if total_metrica > 0
-                else 0.0
-            )
-            linhas_participacao.append(
-                LinhaParticipacaoCanal(
-                    marketplace=marketplace,
-                    valor=valor_formatado,
-                    participacao=participacao,
-                    cor=PALETA_MARKETPLACES.get(
-                        marketplace,
-                        PALETA_DADOS[indice % len(PALETA_DADOS)],
-                    ),
-                    lider=(indice == 0 and len(valores_canais) > 1),
+    with coluna_participacao:
+        titulo_secao(
+            "Participação por canal",
+            "Distribuição de faturamento, pedidos e unidades.",
+        )
+        metricas_participacao = (
+            ("Faturamento", "faturamento", "currency"),
+            ("Pedidos", "pedidos", "integer"),
+            ("Unidades", "unidades", "integer"),
+        )
+        for titulo, chave_metrica, formato in metricas_participacao:
+            valores_canais = [
+                (
+                    marketplace,
+                    float(comparativo.loc[marketplace, chave_metrica]),
                 )
-            )
-        if (
-            len(canais_com_vendas) == 1
-            and canais_com_vendas[0] == "Mercado Livre"
-        ):
-            linhas_participacao.append(
-                LinhaParticipacaoCanal(
-                    marketplace="Shopee",
-                    valor="—",
-                    participacao=None,
-                    cor=PALETA_MARKETPLACES["Shopee"],
-                    em_breve=True,
+                for marketplace in canais_com_vendas
+            ]
+            valores_canais.sort(key=lambda item: item[1], reverse=True)
+            total_metrica = sum(valor for _, valor in valores_canais)
+            linhas_participacao = []
+            for indice, (marketplace, valor) in enumerate(valores_canais):
+                if formato == "currency":
+                    valor_formatado = formatar_moeda_br(valor)
+                else:
+                    valor_formatado = f"{valor:,.0f}".replace(",", ".")
+                participacao = (
+                    valor / total_metrica * 100
+                    if total_metrica > 0
+                    else 0.0
                 )
-            )
-        with coluna_card:
+                linhas_participacao.append(
+                    LinhaParticipacaoCanal(
+                        marketplace=marketplace,
+                        valor=valor_formatado,
+                        participacao=participacao,
+                        cor=PALETA_MARKETPLACES.get(
+                            marketplace,
+                            PALETA_DADOS[indice % len(PALETA_DADOS)],
+                        ),
+                        lider=(indice == 0 and len(valores_canais) > 1),
+                    )
+                )
+            if (
+                len(canais_com_vendas) == 1
+                and canais_com_vendas[0] == "Mercado Livre"
+            ):
+                linhas_participacao.append(
+                    LinhaParticipacaoCanal(
+                        marketplace="Shopee",
+                        valor="—",
+                        participacao=None,
+                        cor=PALETA_MARKETPLACES["Shopee"],
+                        em_breve=True,
+                    )
+                )
             renderizar_card_participacao_canal(
                 titulo,
                 linhas_participacao,

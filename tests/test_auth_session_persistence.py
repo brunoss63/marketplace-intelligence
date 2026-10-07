@@ -458,6 +458,10 @@ class TestAuthSessionPersistence(unittest.TestCase):
             _CHAVE_ID_SESSAO_PROD: session_id,
             "_mi_auth_cookie_manager": cookies,
             "_mi_supabase_access_token": "access",
+            "_mi_active_page": "marketplaces",
+            "_mi_page_entering": False,
+            "_mi_page_entry_index": 3,
+            "_mi_chart_animation_index": 2,
         }
         with (
             patch("autenticacao.st.session_state", session_state),
@@ -482,6 +486,10 @@ class TestAuthSessionPersistence(unittest.TestCase):
         self.assertNotIn(_COOKIE_SESSAO_PROD, cookies.values)
         self.assertNotIn("_mi_supabase_access_token", session_state)
         self.assertNotIn(_CHAVE_ID_SESSAO_PROD, session_state)
+        self.assertNotIn("_mi_active_page", session_state)
+        self.assertNotIn("_mi_page_entering", session_state)
+        self.assertNotIn("_mi_page_entry_index", session_state)
+        self.assertNotIn("_mi_chart_animation_index", session_state)
 
     def test_cookie_legado_prod_e_removido_uma_vez_por_sessao(self) -> None:
         cookies = _CookieManagerFake()

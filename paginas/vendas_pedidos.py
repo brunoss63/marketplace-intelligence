@@ -328,6 +328,137 @@ def _alterar_tamanho_pagina() -> None:
     st.session_state["vendas_pedidos_pagina"] = 0
 
 
+@st.fragment
+def _renderizar_grade_pedidos(
+    ordenada: pd.DataFrame,
+    filtrados: pd.DataFrame,
+    ordenar_por: str,
+    ordem_crescente: bool,
+    chave_grid: str,
+) -> None:
+    tamanho_pagina = st.session_state.get(
+        "vendas_pedidos_tamanho_pagina",
+        15,
+    )
+    total_paginas = max(
+        (len(ordenada) + tamanho_pagina - 1) // tamanho_pagina,
+        1,
+    )
+    pagina = min(
+        max(st.session_state.get("vendas_pedidos_pagina", 0), 0),
+        total_paginas - 1,
+    )
+    st.session_state["vendas_pedidos_pagina"] = pagina
+    inicio = pagina * tamanho_pagina
+    linhas_pagina = ordenada.iloc[inicio:inicio + tamanho_pagina]
+    apresentacao = _formatar_tabela(linhas_pagina).style.apply(
+        _estilos_linha_tabela,
+        axis=1,
+    ).apply(
+        _estilos_marketplace,
+        subset=["Marketplace"],
+        axis=0,
+    ).apply(
+        _estilos_pedido,
+        subset=["Pedido"],
+        axis=0,
+    ).apply(
+        _estilos_taxa,
+        subset=["Taxa"],
+        axis=0,
+    )
+    config_colunas = {
+        nome: st.column_config.TextColumn(
+            label=(
+                f"{nome} "
+                f"{'↑' if ordem_crescente else '↓'}"
+                if nome == ordenar_por
+                else nome
+            ),
+            pinned="left" if nome in {"Data", "Pedido"} else None,
+            width=(
+                "large"
+                if nome == "Pedido"
+                else "small"
+                if nome in {"Data", "Unidades", "Margem %"}
+                else "medium"
+            ),
+        )
+        for nome in COLUNAS_EXIBICAO
+    }
+    estado_grid = st.dataframe(
+        apresentacao,
+        column_config=config_colunas,
+        column_order=COLUNAS_EXIBICAO,
+        hide_index=True,
+        height=min(690, max(385, tamanho_pagina * 35 + 42)),
+        on_select="rerun",
+        selection_mode="single-row",
+        key=chave_grid,
+        width="stretch",
+    )
+    linhas_selecionadas = estado_grid.selection.rows
+    if (
+        linhas_selecionadas
+        and not st.session_state.get("_vendas_pedidos_detalhe_aberto", False)
+    ):
+        indice_linha = linhas_selecionadas[0]
+        if 0 <= indice_linha < len(linhas_pagina):
+            referencias = tuple(ordenada["_row_ref"].astype(str).tolist())
+            referencia = str(linhas_pagina.iloc[indice_linha]["_row_ref"])
+            _abrir_pedido(ordenada, referencias, referencia)
+            st.rerun(scope="app")
+
+    controles = st.columns([1, 1, 1.5, 1.4, 2], gap="small")
+    with controles[0]:
+        st.button(
+            "← Anterior",
+            key="vendas_pedidos_pagina_anterior",
+            disabled=pagina == 0,
+            on_click=_alterar_pagina,
+            args=(-1, total_paginas),
+            width="stretch",
+        )
+    with controles[1]:
+        st.button(
+            "Próxima →",
+            key="vendas_pedidos_pagina_proxima",
+            disabled=pagina >= total_paginas - 1,
+            on_click=_alterar_pagina,
+            args=(1, total_paginas),
+            width="stretch",
+        )
+    with controles[2]:
+        st.html(
+            f'<div class="mi-pagination-label">'
+            f'Página {pagina + 1} de {total_paginas}</div>'
+        )
+    with controles[3]:
+        st.selectbox(
+            "Itens por página",
+            [15, 30, 50],
+            key="vendas_pedidos_tamanho_pagina",
+            on_change=_alterar_tamanho_pagina,
+        )
+    with controles[4]:
+        csv_pedidos = (
+            filtrados.set_index("_row_ref")
+            .loc[ordenada["_row_ref"].astype(str), COLUNAS_PEDIDOS]
+        )
+        st.download_button(
+            "Baixar pedidos filtrados (CSV)",
+            data=_proteger_csv_contra_formulas(csv_pedidos).to_csv(
+                index=False,
+                encoding="utf-8-sig",
+            ),
+            file_name="vendas_pedidos.csv",
+            mime="text/csv",
+            type="secondary",
+            icon=":material/download:",
+            width="stretch",
+        )
+
+
 def _fechar_detalhe() -> None:
     st.session_state["_vendas_pedidos_detalhe_aberto"] = False
     st.session_state["_vendas_pedidos_grid_versao"] = (
@@ -784,23 +915,6 @@ else:
     st.session_state["vendas_pedidos_pagina"] = pagina
     inicio = pagina * tamanho_pagina
     linhas_pagina = ordenada.iloc[inicio:inicio + tamanho_pagina]
-    apresentacao = _formatar_tabela(linhas_pagina)
-    apresentacao = apresentacao.style.apply(
-        _estilos_linha_tabela,
-        axis=1,
-    ).apply(
-        _estilos_marketplace,
-        subset=["Marketplace"],
-        axis=0,
-    ).apply(
-        _estilos_pedido,
-        subset=["Pedido"],
-        axis=0,
-    ).apply(
-        _estilos_taxa,
-        subset=["Taxa"],
-        axis=0,
-    )
 
     st.markdown(
         '<div class="mi-orders-table-anchor"></div>',
@@ -886,96 +1000,13 @@ else:
             f"Pedido {numero_nao_encontrado} não encontrado nos pedidos filtrados."
         )
 
-    config_colunas = {
-        nome: st.column_config.TextColumn(
-            label=(
-                f"{nome} "
-                f"{'↑' if ordem_crescente else '↓'}"
-                if nome == ordenar_por
-                else nome
-            ),
-            pinned="left" if nome in {"Data", "Pedido"} else None,
-            width=(
-                "large"
-                if nome == "Pedido"
-                else "small"
-                if nome in {"Data", "Unidades", "Margem %"}
-                else "medium"
-            ),
-        )
-        for nome in COLUNAS_EXIBICAO
-    }
-    altura = min(690, max(385, tamanho_pagina * 35 + 42))
-    estado_grid = st.dataframe(
-        apresentacao,
-        column_config=config_colunas,
-        column_order=COLUNAS_EXIBICAO,
-        hide_index=True,
-        height=altura,
-        on_select="rerun",
-        selection_mode="single-row",
-        key=chave_grid,
-        width="stretch",
+    _renderizar_grade_pedidos(
+        ordenada,
+        filtrados,
+        ordenar_por,
+        ordem_crescente,
+        chave_grid,
     )
-    linhas_selecionadas = estado_grid.selection.rows
-    if (
-        linhas_selecionadas
-        and not st.session_state.get("_vendas_pedidos_detalhe_aberto", False)
-    ):
-        indice_linha = linhas_selecionadas[0]
-        if 0 <= indice_linha < len(linhas_pagina):
-            referencias = tuple(ordenada["_row_ref"].astype(str).tolist())
-            referencia = str(linhas_pagina.iloc[indice_linha]["_row_ref"])
-            _abrir_pedido(ordenada, referencias, referencia)
-
-    controles = st.columns([1, 1, 1.5, 1.4, 2], gap="small")
-    with controles[0]:
-        st.button(
-            "← Anterior",
-            key="vendas_pedidos_pagina_anterior",
-            disabled=pagina == 0,
-            on_click=_alterar_pagina,
-            args=(-1, total_paginas),
-            width="stretch",
-        )
-    with controles[1]:
-        st.button(
-            "Próxima →",
-            key="vendas_pedidos_pagina_proxima",
-            disabled=pagina >= total_paginas - 1,
-            on_click=_alterar_pagina,
-            args=(1, total_paginas),
-            width="stretch",
-        )
-    with controles[2]:
-        st.html(
-            f'<div class="mi-pagination-label">'
-            f'Página {pagina + 1} de {total_paginas}</div>'
-        )
-    with controles[3]:
-        st.selectbox(
-            "Itens por página",
-            [15, 30, 50],
-            key="vendas_pedidos_tamanho_pagina",
-            on_change=_alterar_tamanho_pagina,
-        )
-    with controles[4]:
-        csv_pedidos = (
-            filtrados.set_index("_row_ref")
-            .loc[ordenada["_row_ref"].astype(str), COLUNAS_PEDIDOS]
-        )
-        st.download_button(
-            "Baixar pedidos filtrados (CSV)",
-            data=_proteger_csv_contra_formulas(csv_pedidos).to_csv(
-                index=False,
-                encoding="utf-8-sig",
-            ),
-            file_name="vendas_pedidos.csv",
-            mime="text/csv",
-            type="secondary",
-            icon=":material/download:",
-            width="stretch",
-        )
 
     if st.session_state.get("_vendas_pedidos_detalhe_aberto", False):
         _mostrar_detalhe_pedido(ordenada)

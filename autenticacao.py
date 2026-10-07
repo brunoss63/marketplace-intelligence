@@ -525,6 +525,10 @@ def _limpar_sessao() -> None:
         for chave in _CHAVES_SESSAO:
             st.session_state.pop(chave, None)
         st.session_state.pop(_COOKIE_MANAGER_SESSAO, None)
+        st.session_state.pop("_mi_active_page", None)
+        st.session_state.pop("_mi_page_entering", None)
+        st.session_state.pop("_mi_page_entry_index", None)
+        st.session_state.pop("_mi_chart_animation_index", None)
 
 
 def obter_cliente_supabase(*, recriar: bool = False) -> Client:
@@ -695,6 +699,10 @@ def _renderizar_login(
             )
             st.session_state["_mi_supabase_user_id"] = resposta.user.id
             st.session_state["_mi_supabase_client"] = cliente
+            st.session_state.pop("_mi_active_page", None)
+            st.session_state.pop("_mi_page_entering", None)
+            st.session_state.pop("_mi_page_entry_index", None)
+            st.session_state.pop("_mi_chart_animation_index", None)
             try:
                 if ambiente == "production":
                     _persistir_sessao_prod(

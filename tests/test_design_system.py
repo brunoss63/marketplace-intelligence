@@ -108,14 +108,42 @@ class TestDesignSystem(unittest.TestCase):
             "LinhaParticipacaoCanal, renderizar_card_participacao_canal)\n"
             "renderizar_card_participacao_canal('Faturamento', ["
             "LinhaParticipacaoCanal("
-            "'Mercado Livre', 'R$ 1.099,50', 100.0, '#73A9FF')])\n"
+            "'Mercado Livre', 'R$ 1.099,50', 100.0, '#73A9FF'), "
+            "LinhaParticipacaoCanal("
+            "'Shopee', '—', None, '#4BD1B2', em_breve=True)], "
+            "compacto=True)\n"
         ).run()
 
         self.assertFalse(app.exception)
         self.assertEqual(len(app.get("html")), 1)
         self.assertEqual(len(app.get("code")), 0)
         self.assertIn("<section class=", app.get("html")[0].value)
+        self.assertIn("mi-channel-comparison-card", app.get("html")[0].value)
         self.assertIn("R$ 1.099,50", app.get("html")[0].value)
+
+    def test_tabela_limpa_pagina_dentro_de_fragmento(self) -> None:
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_string(
+            "import pandas as pd\n"
+            "from componentes import tabela_limpa\n"
+            "tabela_limpa(pd.DataFrame({'Produto': ["
+            "f'Produto {i}' for i in range(21)]}), "
+            "chave='fragmento_teste', linhas_por_pagina=10)\n"
+        ).run()
+
+        self.assertFalse(app.exception)
+        self.assertIn("Página 1 de 3", [item.value for item in app.caption])
+        proxima = next(botao for botao in app.button if botao.label == "›")
+        proxima.click()
+        app.run()
+
+        self.assertFalse(app.exception)
+        self.assertEqual(
+            app.session_state["tabela_fragmento_teste_pagina"],
+            1,
+        )
+        self.assertIn("Página 2 de 3", [item.value for item in app.caption])
 
     def test_perfil_da_sidebar_tem_logout_direto_sem_popover(self) -> None:
         from streamlit.testing.v1 import AppTest
@@ -197,6 +225,32 @@ class TestDesignSystem(unittest.TestCase):
         self.assertIn("translateX(2px)", estilos)
         self.assertIn("prefers-reduced-motion: reduce", estilos)
 
+    def test_transicao_de_autenticacao_cobre_login_e_logout(self) -> None:
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_string(
+            "from componentes import aplicar_estilo\n"
+            "aplicar_estilo()\n"
+        ).run(timeout=15)
+
+        self.assertFalse(app.exception)
+        html = "\n".join(item.value for item in app.get("html"))
+        self.assertIn("mi-auth-transition-out", html)
+        self.assertIn(".st-key-mi_login_submit button", html)
+        self.assertIn(".st-key-mi_logout_sidebar button", html)
+        self.assertIn("evento.target.closest", html)
+        self.assertIn("new MutationObserver", html)
+        self.assertIn("loginFalhou", html)
+        self.assertIn("mensagensAlertasIniciais.has", html)
+        self.assertIn("erroTimeout = window.setTimeout", html)
+        self.assertIn("}, 1600)", html)
+        self.assertIn("mi-auth-transition-in", html)
+        self.assertIn("window.__miAuthEntryPending = true", html)
+        self.assertIn("mi-auth-entry-ready", html)
+        self.assertIn("opacity 760ms", html)
+        self.assertIn("concluir, 8000", html)
+        self.assertIn("prefers-reduced-motion: reduce", html)
+
     def test_kpi_principal_tem_layout_compacto_e_cor_semantica(self) -> None:
         from streamlit.testing.v1 import AppTest
 
@@ -218,6 +272,25 @@ class TestDesignSystem(unittest.TestCase):
         self.assertIn("z-index: 80", html)
         self.assertIn("mi-card-sparkline", html)
         self.assertIn("vs período anterior", html)
+        self.assertIn("--mi-card-glow-rgb: 255, 128, 109", html)
+        self.assertIn(".mi-card.mi-card-value-negative .mi-card-value", html)
+        self.assertIn("rgba(var(--mi-card-glow-rgb), .12)", html)
+        self.assertIn("rgba(var(--mi-card-glow-rgb), .32)", html)
+        self.assertIn("prefers-reduced-motion: reduce", html)
+
+    def test_valor_de_card_sem_semantica_usa_cor_neutra_consistente(self) -> None:
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_string(
+            "from componentes import card\n"
+            "card('Faturamento', 'R$ 125,00', 'chart-coins')\n"
+        ).run()
+
+        self.assertFalse(app.exception)
+        html = "\n".join(item.value for item in app.get("html"))
+        self.assertIn("mi-card-value-normal", html)
+        self.assertIn("color: #E8EEF7", html)
+        self.assertIn("--mi-card-glow-rgb: 115, 169, 255", html)
 
     def test_card_insight_tem_valor_dominante_e_contexto_legivel(self) -> None:
         from streamlit.testing.v1 import AppTest
@@ -349,8 +422,26 @@ class TestDesignSystem(unittest.TestCase):
         self.assertEqual(len(app.get("plotly_chart")), 1)
         html = "\n".join(item.value for item in app.get("html"))
         self.assertIn(".mi-entry-chart", html)
-        self.assertIn("visibility: hidden", html)
+        self.assertIn("mi-chart-enter-0", html)
+        self.assertIn("animation: mi-chart-build 720ms", html)
+        self.assertIn("st-key-mi-chart-panel-", html)
+        self.assertIn(
+            "aguardandoFadeAutenticacao = () =>",
+            html,
+        )
+        self.assertIn(".js-plotly-plot", html)
+        self.assertIn("const elementosGraficoAnimados = new WeakSet()", html)
+        self.assertIn("const entradaGrafico = grafico.animate", html)
+        self.assertIn("clipPath: 'inset(100% 0 0 0)'", html)
+        self.assertNotIn("mi-chart-plot-build", html)
         self.assertIn("new MutationObserver(processarElementos)", html)
+        self.assertIn("document.documentElement", html)
+        self.assertIn("const obterMain", html)
+        self.assertIn("aguardandoFadeAutenticacao()", html)
+        self.assertIn("mi-auth-entry-ready", html)
+        self.assertIn("tentativaAposFade = window.setTimeout", html)
+        self.assertIn("agendarTentativaGrafico(titulo)", html)
+        self.assertIn("grafico.animate", html)
         self.assertIn("mi-chart-minimal", "\n".join(
             item.value for item in app.markdown
         ))

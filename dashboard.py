@@ -74,19 +74,6 @@ paginas = [
 
 
 pg = st.navigation(paginas)
-pagina_atual = {
-    "Visão Geral": "visao_geral",
-    "Vendas & Pedidos": "vendas_pedidos",
-    "Marketplaces": "marketplaces",
-    "Produtos & Estoque": "produtos_estoque",
-    "Inteligência": "inteligencia",
-    "Importar dados": "importar_dados",
-    "Administração": "administracao",
-}.get(pg.title, "")
-mudou_pagina = (
-    pagina_atual
-    and st.session_state.get("_mi_active_page") != pagina_atual
-)
 # Filtros compartilhados aparecem antes de cada página e persistem
 # durante a navegação multipágina.
 renderizar_filtros_globais()
@@ -102,8 +89,4 @@ with st.sidebar.container(key="mi-sidebar-footer"):
     renderizar_indicador_conexoes(container=st)
 
 with st.container(key="mi-page-content"):
-    if mudou_pagina:
-        with st.spinner("Preparando sua próxima visão...", show_time=False):
-            pg.run()
-    else:
-        pg.run()
+    pg.run()

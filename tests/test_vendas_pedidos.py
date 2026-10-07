@@ -69,6 +69,20 @@ class TestPaginaVendasPedidos(unittest.TestCase):
         self.assertLessEqual(len(app.dataframe[0].value), 30)
         self.assertFalse(app.exception)
 
+    def test_paginacao_de_pedidos_atualiza_tabela(self) -> None:
+        app = self._abrir_pagina()
+        primeira_linha = app.dataframe[0].value.iloc[0]["Pedido"]
+
+        proxima = next(
+            botao for botao in app.button if botao.label == "Próxima →"
+        )
+        proxima.click()
+        self._executar(app)
+
+        self.assertEqual(app.session_state["vendas_pedidos_pagina"], 1)
+        self.assertNotEqual(app.dataframe[0].value.iloc[0]["Pedido"], primeira_linha)
+        self.assertFalse(app.exception)
+
     def test_selecao_abre_detalhe_e_navega_sem_sair_da_pagina(self) -> None:
         app = self._abrir_pagina()
         app.session_state["vendas_pedidos_grid_0"] = {

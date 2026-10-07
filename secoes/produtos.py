@@ -385,6 +385,7 @@ def _formatar_tabela(catalogo: pd.DataFrame, visao: str) -> pd.DataFrame:
     return pd.DataFrame({coluna: mapa[coluna] for coluna in colunas})
 
 
+@st.fragment
 def _mostrar_portfolio(catalogo: pd.DataFrame) -> None:
     titulo_secao(
         "Portfólio",

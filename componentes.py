@@ -654,7 +654,7 @@ def grafico_dashboard(
 
     indice_animacao = st.session_state.get("_mi_chart_animation_index", 0)
     st.session_state["_mi_chart_animation_index"] = indice_animacao + 1
-    animar_entrada = False
+    animar_entrada = st.session_state.get("_mi_page_entering", False)
     atraso_animacao = min(indice_animacao * 110, 550)
 
     tem_linha = any(
@@ -909,7 +909,10 @@ def grafico_dashboard(
         else None
     )
 
-    with st.container(border=True):
+    with st.container(
+        border=True,
+        key=f"mi-chart-panel-{indice_animacao}",
+    ):
         classe_animacao = ""
         if animar_entrada:
             classe_animacao = f" mi-chart-enter-{indice_animacao}"
@@ -1141,6 +1144,7 @@ def titulo_secao(titulo: str, subtitulo: str) -> None:
     )
 
 
+@st.fragment
 def tabela_limpa(
     tabela: pd.DataFrame,
     badges: dict[str, dict[str, str]] | None = None,
@@ -1154,6 +1158,7 @@ def tabela_limpa(
     largura_maxima_px: int | None = None,
     largura_minima_px: int = 640,
     borda_externa: bool = True,
+    compacta: bool = False,
 ) -> None:
     """Renderiza uma tabela paginada no padrão visual do dashboard."""
 
@@ -1291,6 +1296,7 @@ def tabela_limpa(
         linhas.append(f"<tr>{''.join(celulas)}</tr>")
 
     classe_borda = "" if borda_externa else " mi-clean-table-plain"
+    classe_compacta = " mi-clean-table-compact" if compacta else ""
     estilo_largura = (
         f"max-width:{largura_maxima_px}px;"
         if largura_maxima_px is not None
@@ -1373,6 +1379,10 @@ def tabela_limpa(
                 white-space: nowrap;
                 font-variant-numeric: tabular-nums;
             }}
+            .mi-clean-table-compact .mi-clean-table td {{
+                padding: 6px 10px;
+                line-height: 1.2;
+            }}
             .mi-clean-table td:first-child {{
                 color: #A8B6C9;
                 font-variant-numeric: normal;
@@ -1454,7 +1464,7 @@ def tabela_limpa(
                 }}
             }}
         </style>
-        <div class="mi-clean-table-wrap{classe_borda}">
+        <div class="mi-clean-table-wrap{classe_borda}{classe_compacta}">
             <table class="mi-clean-table">
                 <thead><tr>{cabecalhos}</tr></thead>
                 <tbody>{''.join(linhas)}</tbody>
@@ -1610,13 +1620,6 @@ def renderizar_animacoes_entrada_pagina() -> None:
             .mi-count-final {
                 font-variant-numeric: tabular-nums;
             }
-            @media (prefers-reduced-motion: no-preference) {
-                [data-testid="stVerticalBlockBorderWrapper"]:has(
-                    .mi-entry-chart
-                ) .js-plotly-plot {
-                    visibility: hidden;
-                }
-            }
             @media (prefers-reduced-motion: reduce) {
                 .mi-entry-card,
                 .mi-entry-chart {
@@ -1635,7 +1638,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                 if (window.__miEntryAnimationsInitialized) return;
                 window.__miEntryAnimationsInitialized = true;
 
-                const main = document.querySelector(
+                const obterMain = () => document.querySelector(
                     '[data-testid="stMain"]'
                 ) || document.body;
                 const reduzido = window.matchMedia(
@@ -1643,8 +1646,21 @@ def renderizar_animacoes_entrada_pagina() -> None:
                 ).matches;
                 const valoresAnimados = new WeakSet();
                 const graficosAnimados = new WeakSet();
+                const elementosGraficoAnimados = new WeakSet();
                 const graficosAguardando = new WeakSet();
                 const tentativasGrafico = new WeakMap();
+                let tentativaAposFade = null;
+                const aguardandoFadeAutenticacao = () => (
+                    window.__miAuthEntryPending
+                    && (
+                        document.documentElement.classList.contains(
+                            'mi-auth-transition-out'
+                        )
+                        || document.documentElement.classList.contains(
+                            'mi-auth-transition-in'
+                        )
+                    )
+                );
                 const formatar = (elemento, numero) => {
                     const casas = Number(elemento.dataset.miDecimals || 0);
                     const formato = new Intl.NumberFormat('pt-BR', {
@@ -1658,7 +1674,8 @@ def renderizar_animacoes_entrada_pagina() -> None:
 
                 const animarValor = elemento => {
                     if (
-                        valoresAnimados.has(elemento)
+                        aguardandoFadeAutenticacao()
+                        || valoresAnimados.has(elemento)
                         || !elemento.closest('.mi-entry-card')
                     ) return;
                     valoresAnimados.add(elemento);
@@ -1737,7 +1754,28 @@ def renderizar_animacoes_entrada_pagina() -> None:
                             );
                             if (grafico) {
                                 grafico.style.visibility = 'visible';
+                                if (typeof grafico.animate === 'function') {
+                                    const entrada = grafico.animate(
+                                        [
+                                            {
+                                                opacity: 0,
+                                                transform: 'translateY(10px) scale(.985)'
+                                            },
+                                            {
+                                                opacity: 1,
+                                                transform: 'translateY(0) scale(1)'
+                                            }
+                                        ],
+                                        {
+                                            duration: 520,
+                                            easing: 'cubic-bezier(.22,.61,.36,1)'
+                                        }
+                                    );
+                                    entrada.onfinish = () => entrada.cancel();
+                                }
                                 graficosAnimados.add(titulo);
+                            } else {
+                                tentativasGrafico.delete(titulo);
                             }
                             return;
                         }
@@ -1746,16 +1784,56 @@ def renderizar_animacoes_entrada_pagina() -> None:
                 };
 
                 const animarGraficos = () => {
-                    for (const titulo of main.querySelectorAll(
+                    if (aguardandoFadeAutenticacao()) return;
+                    for (const titulo of obterMain().querySelectorAll(
                         '.mi-entry-chart'
                     )) {
                         if (reduzido || graficosAnimados.has(titulo)) continue;
-                        const bloco = titulo.closest(
+                        const painel = titulo.closest(
+                            '[class*="st-key-mi-chart-panel-"]'
+                        ) || titulo.closest(
                             '[data-testid="stVerticalBlockBorderWrapper"]'
                         ) || titulo.closest('[data-testid="stVerticalBlock"]');
-                        const grafico = bloco?.querySelector('.js-plotly-plot');
+                        const grafico = painel?.querySelector(
+                            '.js-plotly-plot'
+                        );
+                        if (!grafico) {
+                            agendarTentativaGrafico(titulo);
+                            continue;
+                        }
+                        if (!elementosGraficoAnimados.has(grafico)) {
+                            elementosGraficoAnimados.add(grafico);
+                            grafico.style.visibility = 'visible';
+                            const atraso = Number.parseInt(
+                                getComputedStyle(titulo)
+                                    .getPropertyValue('--mi-entry-delay'),
+                                10
+                            ) || 0;
+                            const entradaGrafico = grafico.animate(
+                                [
+                                    {
+                                        clipPath: 'inset(100% 0 0 0)',
+                                        opacity: .2,
+                                        transform: 'translateY(8px)'
+                                    },
+                                    {
+                                        clipPath: 'inset(0 0 0 0)',
+                                        opacity: 1,
+                                        transform: 'translateY(0)'
+                                    }
+                                ],
+                                {
+                                    duration: 1100,
+                                    delay: atraso,
+                                    easing: 'cubic-bezier(.22,.61,.36,1)',
+                                    fill: 'both'
+                                }
+                            );
+                            entradaGrafico.onfinish = () =>
+                                entradaGrafico.cancel();
+                        }
                         const barras = [
-                            ...(grafico?.querySelectorAll(
+                            ...(grafico.querySelectorAll(
                                 '.barlayer .point'
                             ) || [])
                         ];
@@ -1783,7 +1861,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                             continue;
                         }
                         const fatias = [
-                            ...(grafico?.querySelectorAll(
+                            ...(grafico.querySelectorAll(
                                 '.pielayer .slice .surface'
                             ) || [])
                         ];
@@ -1816,7 +1894,7 @@ def renderizar_animacoes_entrada_pagina() -> None:
                             graficosAnimados.add(titulo);
                             continue;
                         }
-                        const serie = grafico?.querySelector(
+                        const serie = grafico.querySelector(
                             '.scatterlayer .trace'
                         );
                         const linha = serie?.querySelector('.js-line');
@@ -1895,16 +1973,37 @@ def renderizar_animacoes_entrada_pagina() -> None:
                 };
 
                 const processarElementos = () => {
+                    if (aguardandoFadeAutenticacao()) {
+                        if (tentativaAposFade === null) {
+                            tentativaAposFade = window.setTimeout(() => {
+                                tentativaAposFade = null;
+                                processarElementos();
+                            }, 100);
+                        }
+                        return;
+                    }
+                    if (tentativaAposFade !== null) {
+                        window.clearTimeout(tentativaAposFade);
+                        tentativaAposFade = null;
+                    }
+                    const main = obterMain();
                     main.querySelectorAll('.mi-count-value').forEach(
                         animarValor
                     );
                     animarGraficos();
                 };
+                window.addEventListener(
+                    'mi-auth-entry-ready',
+                    processarElementos
+                );
                 processarElementos();
-                new MutationObserver(processarElementos).observe(main, {
+                new MutationObserver(processarElementos).observe(
+                    document.documentElement,
+                    {
                     childList: true,
                     subtree: true
-                });
+                    }
+                );
             })();
         </script>
         """,
@@ -2160,6 +2259,8 @@ def card(
 
             overflow: visible;
 
+            --mi-card-glow-rgb: 115, 169, 255;
+
             background:
                 linear-gradient(
                     145deg,
@@ -2255,30 +2356,6 @@ def card(
             line-height: 1.08;
             letter-spacing: -.035em;
             white-space: nowrap;
-        }}
-
-        .mi-card-operacional.mi-card-value-positive .mi-card-value {{
-            color: #8AE3A8;
-        }}
-
-        .mi-card-operacional.mi-card-value-negative .mi-card-value {{
-            color: #FF9A91;
-        }}
-
-        .mi-card-operacional.mi-card-value-neutral .mi-card-value {{
-            color: #C5D0DE;
-        }}
-
-        .mi-card-principal.mi-card-value-positive .mi-card-value {{
-            color: #8AE3A8;
-        }}
-
-        .mi-card-principal.mi-card-value-negative .mi-card-value {{
-            color: #FF9A91;
-        }}
-
-        .mi-card-principal.mi-card-value-neutral .mi-card-value {{
-            color: #C5D0DE;
         }}
 
         .mi-card-operacional {{
@@ -2397,10 +2474,11 @@ def card(
             z-index: 20;
 
             box-shadow:
-                0 18px 38px rgba(0,0,0,0.38);
+                0 18px 38px rgba(0,0,0,0.38),
+                0 0 24px rgba(var(--mi-card-glow-rgb), .12);
 
             border-color:
-                rgba(115,169,255,0.34);
+                rgba(var(--mi-card-glow-rgb), .4);
 
             background:
                 linear-gradient(
@@ -2448,11 +2526,11 @@ def card(
             background:
                 radial-gradient(
                     circle,
-                    rgba(59,130,246,0.20),
+                    rgba(var(--mi-card-glow-rgb), .32),
                     transparent 70%
                 );
 
-            opacity: 0;
+            opacity: .16;
 
             pointer-events: none;
 
@@ -2465,10 +2543,10 @@ def card(
 
         .mi-card:hover .mi-card-glow {{
 
-            opacity: 1;
+            opacity: .72;
 
             transform:
-                scale(1.35);
+                scale(1.5);
 
         }}
 
@@ -2696,7 +2774,7 @@ def card(
 
         .mi-card-value {{
 
-            color: white;
+            color: #E8EEF7;
 
             font-size: 27px;
 
@@ -2706,6 +2784,30 @@ def card(
 
             margin-bottom: 3px;
 
+        }}
+
+        .mi-card-value-positive {{
+            --mi-card-glow-rgb: 74, 222, 128;
+        }}
+
+        .mi-card-value-negative {{
+            --mi-card-glow-rgb: 255, 128, 109;
+        }}
+
+        .mi-card-value-neutral {{
+            --mi-card-glow-rgb: 148, 163, 184;
+        }}
+
+        .mi-card.mi-card-value-positive .mi-card-value {{
+            color: #8AE3A8;
+        }}
+
+        .mi-card.mi-card-value-negative .mi-card-value {{
+            color: #FF9A91;
+        }}
+
+        .mi-card.mi-card-value-neutral .mi-card-value {{
+            color: #C5D0DE;
         }}
 
         .mi-count-value {{
@@ -2767,6 +2869,14 @@ def card(
         .mi-card-neutral .mi-card-description {{
             color: #A0AEC0;
 
+        }}
+
+        @media (prefers-reduced-motion: reduce) {{
+            .mi-card,
+            .mi-card-icon,
+            .mi-card-glow {{
+                transition: none;
+            }}
         }}
 
     </style>
@@ -3235,7 +3345,171 @@ def animar_elementos_rolagem() -> None:
 # ESTILO GLOBAL
 # =========================================================
 
+def _instalar_transicao_autenticacao() -> None:
+    st.html(
+        """
+        <style>
+            body::after {
+                position: fixed;
+                z-index: 2147483647;
+                inset: 0;
+                background:
+                    radial-gradient(
+                        ellipse at 50% 42%,
+                        rgba(25, 46, 76, .28),
+                        transparent 70%
+                    ),
+                    #080D17;
+                content: "";
+                opacity: 0;
+                visibility: hidden;
+                pointer-events: none;
+                transition:
+                    opacity 360ms cubic-bezier(.2, .7, .2, 1),
+                    visibility 0s linear 360ms;
+            }
+            html.mi-auth-transition-out body::after {
+                opacity: 1;
+                visibility: visible;
+                transition: opacity 360ms cubic-bezier(.2, .7, .2, 1);
+            }
+            html.mi-auth-transition-in body::after {
+                opacity: 0;
+                visibility: visible;
+                transition: opacity 760ms cubic-bezier(.2, .7, .2, 1);
+            }
+            @media (prefers-reduced-motion: reduce) {
+                body::after,
+                html.mi-auth-transition-out body::after,
+                html.mi-auth-transition-in body::after {
+                    transition-duration: 1ms;
+                    transition-delay: 0s;
+                }
+            }
+        </style>
+        <script>
+            (() => {
+                if (window.__miAuthTransitionInitialized) return;
+                window.__miAuthTransitionInitialized = true;
+
+                let destino = null;
+                let timeout = null;
+                let erroTimeout = null;
+                let revelarTimeout = null;
+                let mensagensAlertasIniciais = new Set();
+                const concluir = () => {
+                    if (!destino) return;
+                    window.clearTimeout(timeout);
+                    window.clearTimeout(erroTimeout);
+                    window.clearTimeout(revelarTimeout);
+                    const proximoDestino = destino;
+                    destino = null;
+                    window.requestAnimationFrame(() => {
+                        window.requestAnimationFrame(() => {
+                            document.documentElement.classList.remove(
+                                'mi-auth-transition-out'
+                            );
+                            document.documentElement.classList.add(
+                                'mi-auth-transition-in'
+                            );
+                            const duracao = window.matchMedia(
+                                '(prefers-reduced-motion: reduce)'
+                            ).matches ? 50 : 820;
+                            revelarTimeout = window.setTimeout(() => {
+                                document.documentElement.classList.remove(
+                                    'mi-auth-transition-in'
+                                );
+                                if (proximoDestino === 'dashboard') {
+                                    window.__miAuthEntryPending = false;
+                                    window.dispatchEvent(
+                                        new Event('mi-auth-entry-ready')
+                                    );
+                                }
+                            }, duracao);
+                        });
+                    });
+                };
+                const iniciar = proximoDestino => {
+                    if (destino) return;
+                    destino = proximoDestino;
+                    if (proximoDestino === 'dashboard') {
+                        window.__miAuthEntryPending = true;
+                    }
+                    mensagensAlertasIniciais = new Set(
+                        [...document.querySelectorAll(
+                            '[data-testid="stAlert"]'
+                        )].map(alerta => alerta.textContent.trim())
+                    );
+                    document.documentElement.classList.add(
+                        'mi-auth-transition-out'
+                    );
+                    timeout = window.setTimeout(concluir, 8000);
+                    if (proximoDestino === 'dashboard') {
+                        erroTimeout = window.setTimeout(() => {
+                            if (
+                                destino === 'dashboard'
+                                && document.querySelector('.mi-login-layout')
+                                && document.querySelector(
+                                    '[data-testid="stAlert"]'
+                                )
+                            ) {
+                                concluir();
+                            }
+                        }, 1600);
+                    }
+                };
+
+                document.addEventListener('click', evento => {
+                    if (!(evento.target instanceof Element)) return;
+                    if (evento.target.closest(
+                        '.st-key-mi_login_submit button'
+                    )) {
+                        iniciar('dashboard');
+                    } else if (evento.target.closest(
+                        '.st-key-mi_logout_sidebar button, '
+                        + '.st-key-mi_logout_unlinked button'
+                    )) {
+                        iniciar('login');
+                    }
+                }, true);
+
+                new MutationObserver(() => {
+                    if (!destino) return;
+                    const loginVisivel = Boolean(
+                        document.querySelector('.mi-login-layout')
+                    );
+                    const loginFalhou = (
+                        destino === 'dashboard'
+                        && loginVisivel
+                        && [...document.querySelectorAll(
+                            '[data-testid="stAlert"]'
+                        )].some(alerta => (
+                            !mensagensAlertasIniciais.has(
+                                alerta.textContent.trim()
+                            )
+                        ))
+                    );
+                    if (
+                        (destino === 'dashboard' && !loginVisivel)
+                        || (destino === 'login' && loginVisivel)
+                        || loginFalhou
+                    ) {
+                        concluir();
+                    }
+                }).observe(document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+            })();
+        </script>
+        """,
+        unsafe_allow_javascript=True,
+    )
+
+
 def aplicar_estilo():
+
+    _instalar_transicao_autenticacao()
 
     tokens_css = ";".join(
         f"--mi-{nome}: {valor}"
@@ -4907,17 +5181,40 @@ def aplicar_estilo():
         }
 
         .mi-channel-comparison-card {
-            min-height: 270px;
+            min-height: 0;
             justify-content: flex-start;
-            padding: 15px 16px;
+            padding: 9px 12px;
         }
 
         .mi-channel-comparison-card .mi-channel-single-heading {
-            margin-bottom: 13px;
+            margin-bottom: 7px;
         }
 
         .mi-channel-comparison-card .mi-channel-row {
             opacity: 1;
+            margin-top: 3px;
+        }
+
+        .mi-channel-comparison-card .mi-channel-row-heading {
+            min-height: 18px;
+        }
+
+        .mi-channel-comparison-card .mi-channel-row-leader {
+            padding: 4px 7px 5px;
+        }
+
+        .mi-channel-comparison-card .mi-channel-row-value-row {
+            margin-top: 1px;
+        }
+
+        .mi-channel-comparison-card
+        .mi-channel-row-value-row .mi-channel-single-value {
+            font-size: 15px;
+        }
+
+        .mi-channel-comparison-card .mi-channel-single-track {
+            height: 5px;
+            margin-top: 5px;
         }
 
         .mi-channel-row {
